@@ -20,11 +20,10 @@ import org.junit.jupiter.api.Test;
 import org.openrewrite.DocumentExample;
 import org.openrewrite.Issue;
 import org.openrewrite.SourceFile;
-import org.openrewrite.test.UncheckedConsumer;
+import org.openrewrite.internal.ListUtils;
 import org.openrewrite.java.marker.JavaSourceSet;
 import org.openrewrite.java.search.FindTypes;
 import org.openrewrite.java.tree.J;
-import org.openrewrite.java.tree.JavaSourceFile;
 import org.openrewrite.java.tree.JavaType;
 import org.openrewrite.java.tree.NameTree;
 import org.openrewrite.java.tree.TypeUtils;
@@ -34,9 +33,7 @@ import org.openrewrite.test.SourceSpec;
 import org.openrewrite.test.TypeValidation;
 
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -673,38 +670,50 @@ class ChangePackageTest implements RewriteTest {
         );
     }
 
-    @Test
+    @SuppressWarnings("ConstantConditions")
+    private static void addTypesToSourceSet(List<SourceFile> sourceFiles, String... typeNames) {
+        List<JavaType.FullyQualified> types = new ArrayList<>();
+        for (String typeName : typeNames) {
+            types.add(JavaType.ShallowClass.build(typeName));
+        }
+        for (int i = 0; i < sourceFiles.size(); i++) {
+            SourceFile sf = sourceFiles.get(i);
+            JavaSourceSet ss = sf.getMarkers().findFirst(JavaSourceSet.class)
+                    .map(existing -> existing.withClasspath(ListUtils.concatAll(existing.getClasspath(), types)))
+                    .orElseGet(() -> new JavaSourceSet(UUID.randomUUID(), "main", types, Collections.emptyMap()));
+            sourceFiles.set(i, sf.withMarkers(sf.getMarkers().computeByType(ss, (orig, upd) -> upd)));
+        }
+    }
 
+    @Test
     void changePackageExpandsStarImportWhenItWouldCreateAmbiguity() {
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
                   .typeValidationOptions(TypeValidation.none())
-                  .beforeRecipe(withSourceTypesOnClasspath()),
-          //language=java
-          java(
-            """
-              package origpkg.validation;
-              public @interface ExtraneousAnnotation {}
-              """,
-            """
-              package newpkg.validation;
-              public @interface ExtraneousAnnotation {}
-              """
-          ),
-          //language=java
-          java(
-            """
-              package otherpkg.validation;
-              public @interface NotBlank {}
-              """
-          ),
-          //language=java
-          java(
-            """
-              package newpkg.validation;
-              public @interface NotBlank {}
-              """
-          ),
+                  .parser(JavaParser.fromJavaVersion().dependsOn(
+                    """
+                      package origpkg.validation;
+                      public @interface ExtraneousAnnotation {}
+                      """,
+                    """
+                      package newpkg.validation;
+                      public @interface ExtraneousAnnotation {}
+                      """,
+                    """
+                      package newpkg.validation;
+                      public @interface NotBlank {}
+                      """,
+                    """
+                      package otherpkg.validation;
+                      public @interface NotBlank {}
+                      """
+                  ))
+                  .beforeRecipe(sourceFiles -> addTypesToSourceSet(sourceFiles,
+                    "origpkg.validation.ExtraneousAnnotation",
+                    "newpkg.validation.ExtraneousAnnotation",
+                    "newpkg.validation.NotBlank",
+                    "otherpkg.validation.NotBlank"
+                  )),
           //language=java
           java(
             """
@@ -738,30 +747,24 @@ class ChangePackageTest implements RewriteTest {
     }
 
     @Test
-
     void changePackagePreservesStarImportWhenNoAmbiguity() {
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
                   .typeValidationOptions(TypeValidation.none())
-                  .beforeRecipe(withSourceTypesOnClasspath()),
-          //language=java
-          java(
-            """
-              package origpkg.validation;
-              public @interface ExtraneousAnnotation {}
-              """,
-            """
-              package newpkg.validation;
-              public @interface ExtraneousAnnotation {}
-              """
-          ),
-          //language=java
-          java(
-            """
-              package otherpkg.validation;
-              public @interface NotBlank {}
-              """
-          ),
+                  .parser(JavaParser.fromJavaVersion().dependsOn(
+                    """
+                      package origpkg.validation;
+                      public @interface ExtraneousAnnotation {}
+                      """,
+                    """
+                      package otherpkg.validation;
+                      public @interface NotBlank {}
+                      """
+                  ))
+                  .beforeRecipe(sourceFiles -> addTypesToSourceSet(sourceFiles,
+                    "origpkg.validation.ExtraneousAnnotation",
+                    "otherpkg.validation.NotBlank"
+                  )),
           //language=java
           java(
             """
@@ -2042,39 +2045,4 @@ class ChangePackageTest implements RewriteTest {
         );
     }
 
-    /**
-     * Enrich each source file's JavaSourceSet marker with types declared in other source files,
-     * so that classpath-based ambiguity detection works in tests where types come from source
-     * files rather than JARs.
-     */
-    private static UncheckedConsumer<List<SourceFile>> withSourceTypesOnClasspath() {
-        return sourceFiles -> {
-            List<JavaType.FullyQualified> sourceTypes = new ArrayList<>();
-            for (SourceFile sf : sourceFiles) {
-                if (sf instanceof JavaSourceFile) {
-                    for (J.ClassDeclaration classDecl : ((JavaSourceFile) sf).getClasses()) {
-                        JavaType.FullyQualified type = classDecl.getType();
-                        if (type != null) {
-                            sourceTypes.add(type);
-                        }
-                    }
-                }
-            }
-            for (int i = 0; i < sourceFiles.size(); i++) {
-                SourceFile sf = sourceFiles.get(i);
-                Optional<JavaSourceSet> maybeSourceSet = sf.getMarkers().findFirst(JavaSourceSet.class);
-                JavaSourceSet ss;
-                if (maybeSourceSet.isPresent()) {
-                    ss = maybeSourceSet.get();
-                    List<JavaType.FullyQualified> enriched = new ArrayList<>(ss.getClasspath());
-                    enriched.addAll(sourceTypes);
-                    ss = ss.withClasspath(enriched);
-                } else {
-                    ss = new JavaSourceSet(java.util.UUID.randomUUID(), "main", sourceTypes, java.util.Collections.emptyMap());
-                }
-                sourceFiles.set(i, sf.withMarkers(
-                  sf.getMarkers().computeByType(ss, (orig, upd) -> upd)));
-            }
-        };
-    }
 }
