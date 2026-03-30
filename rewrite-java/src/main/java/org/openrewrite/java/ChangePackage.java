@@ -21,29 +21,30 @@ import lombok.With;
 import org.jspecify.annotations.Nullable;
 import org.openrewrite.*;
 import org.openrewrite.internal.ListUtils;
+import org.openrewrite.java.marker.JavaSourceSet;
 import org.openrewrite.java.tree.*;
 import org.openrewrite.marker.SearchResult;
 import org.openrewrite.trait.Reference;
 
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.IdentityHashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static java.util.Objects.requireNonNull;
+import static org.openrewrite.Tree.randomId;
 
 /**
  * A recipe that will rename a package name in package statements, imports, and fully-qualified types (see: NOTE).
  * <p>
  * NOTE: Does not currently transform all possible type references, and accomplishing this would be non-trivial.
- * For example, a method invocation select might refer to field `A a` whose type has now changed to `A2`, and so the type
- * on the select should change as well. But how do we identify the set of all method selects which refer to `a`? Suppose
- * it were prefixed like `this.a`, or `MyClass.this.a`, or indirectly via a separate method call like `getA()` where `getA()`
+ * For example, a method invocation select might refer to field {@code A a} whose type has now changed to {@code A2}, and so the type
+ * on the select should change as well. But how do we identify the set of all method selects which refer to {@code a}? Suppose
+ * it were prefixed like {@code this.a}, or {@code MyClass.this.a}, or indirectly via a separate method call like {@code getA()} where {@code getA()}
  * is defined on the super class.
  */
 @Value
 @EqualsAndHashCode(callSuper = false)
-public class ChangePackage extends Recipe {
+public class ChangePackage extends ScanningRecipe<Map<String, Set<String>>> {
     @Option(displayName = "Old package name",
             description = "The package name to replace.",
             example = "com.yourorg.foo")
@@ -78,7 +79,36 @@ public class ChangePackage extends Recipe {
     }
 
     @Override
-    public TreeVisitor<?, ExecutionContext> getVisitor() {
+    public Map<String, Set<String>> getInitialValue(ExecutionContext ctx) {
+        return new ConcurrentHashMap<>();
+    }
+
+    @Override
+    public TreeVisitor<?, ExecutionContext> getScanner(Map<String, Set<String>> packageTypesMap) {
+        return new TreeVisitor<Tree, ExecutionContext>() {
+            @Override
+            public @Nullable Tree visit(@Nullable Tree tree, ExecutionContext ctx) {
+                if (tree instanceof JavaSourceFile) {
+                    JavaSourceFile cu = (JavaSourceFile) tree;
+                    if (cu.getPackageDeclaration() != null) {
+                        String pkg = cu.getPackageDeclaration().getExpression()
+                                .printTrimmed(new Cursor(getCursor(), cu)).replaceAll("\\s", "");
+                        for (J.ClassDeclaration classDecl : cu.getClasses()) {
+                            if (classDecl.getSimpleName() != null && !classDecl.getSimpleName().isEmpty()) {
+                                packageTypesMap
+                                        .computeIfAbsent(pkg, k -> ConcurrentHashMap.newKeySet())
+                                        .add(classDecl.getSimpleName());
+                            }
+                        }
+                    }
+                }
+                return tree;
+            }
+        };
+    }
+
+    @Override
+    public TreeVisitor<?, ExecutionContext> getVisitor(Map<String, Set<String>> packageTypesMap) {
         TreeVisitor<?, ExecutionContext> condition = new TreeVisitor<Tree, ExecutionContext>() {
             @Override
             public @Nullable Tree preVisit(@Nullable Tree tree, ExecutionContext ctx) {
@@ -132,7 +162,7 @@ public class ChangePackage extends Recipe {
             public @Nullable Tree preVisit(@Nullable Tree tree, ExecutionContext ctx) {
                 stopAfterPreVisit();
                 if (tree instanceof JavaSourceFile) {
-                    return new JavaChangePackageVisitor().visit(tree, ctx, requireNonNull(getCursor().getParent()));
+                    return new JavaChangePackageVisitor(packageTypesMap).visit(tree, ctx, requireNonNull(getCursor().getParent()));
                 } else if (tree instanceof SourceFileWithReferences) {
                     SourceFileWithReferences sourceFile = (SourceFileWithReferences) tree;
                     SourceFileWithReferences.References references = sourceFile.getReferences();
@@ -155,6 +185,11 @@ public class ChangePackage extends Recipe {
 
         private final Map<JavaType, JavaType> oldNameToChangedType = new IdentityHashMap<>();
         private final JavaType.Class newPackageType = JavaType.ShallowClass.build(newPackageName);
+        private final Map<String, Set<String>> packageTypesMap;
+
+        JavaChangePackageVisitor(Map<String, Set<String>> packageTypesMap) {
+            this.packageTypesMap = packageTypesMap;
+        }
 
         @Override
         public J visitFieldAccess(J.FieldAccess fieldAccess, ExecutionContext ctx) {
@@ -271,10 +306,153 @@ public class ChangePackage extends Recipe {
                     }
                 }
 
+                // Expand changed star imports that would create ambiguity with other star imports
+                sf = maybeExpandStarImport(sf, newPackageName);
+                if (changingTo != null && !changingTo.equals(newPackageName)) {
+                    sf = maybeExpandStarImport(sf, changingTo);
+                }
+                if (Boolean.TRUE.equals(recursive)) {
+                    for (J.Import anImport : sf.getImports()) {
+                        if (!anImport.isStatic() && "*".equals(anImport.getQualid().getSimpleName())) {
+                            String pkg = anImport.getPackageName();
+                            if (pkg.startsWith(newPackageName + ".")) {
+                                sf = maybeExpandStarImport(sf, pkg);
+                            }
+                        }
+                    }
+                }
+
                 j = sf;
             }
             //noinspection DataFlowIssue
             return j;
+        }
+
+        /**
+         * If a star import for {@code changedPackage} exists alongside other star imports,
+         * and types from {@code changedPackage} share simple names with types from those
+         * other packages, expand the star import into explicit imports to avoid ambiguity.
+         */
+        private JavaSourceFile maybeExpandStarImport(JavaSourceFile sf, String changedPackage) {
+            J.Import changedStarImport = null;
+            Set<String> otherStarPackages = new LinkedHashSet<>();
+            for (J.Import anImport : sf.getImports()) {
+                if (anImport.isStatic() || !"*".equals(anImport.getQualid().getSimpleName())) {
+                    continue;
+                }
+                if (anImport.getPackageName().equals(changedPackage)) {
+                    changedStarImport = anImport;
+                } else {
+                    otherStarPackages.add(anImport.getPackageName());
+                }
+            }
+
+            if (changedStarImport == null || otherStarPackages.isEmpty()) {
+                return sf;
+            }
+
+            // Collect simple names of types used from the changed package
+            Set<String> usedFromChangedPackage = new TreeSet<>();
+            for (JavaType type : sf.getTypesInUse().getTypesInUse()) {
+                if (type instanceof JavaType.FullyQualified) {
+                    JavaType.FullyQualified fq = (JavaType.FullyQualified) type;
+                    if (fq.getPackageName().equals(changedPackage)) {
+                        usedFromChangedPackage.add(fq.getClassName());
+                    }
+                }
+            }
+
+            if (usedFromChangedPackage.isEmpty()) {
+                return sf;
+            }
+
+            if (!hasAmbiguity(sf, changedPackage, otherStarPackages)) {
+                return sf;
+            }
+
+            // Expand the changed star import into explicit imports
+            J.Import starImport = changedStarImport;
+            return sf.withImports(ListUtils.flatMap(sf.getImports(), anImport -> {
+                if (anImport == starImport) {
+                    List<J.Import> expanded = new ArrayList<>(usedFromChangedPackage.size());
+                    int i = 0;
+                    for (String simpleName : usedFromChangedPackage) {
+                        J.FieldAccess newQualid = starImport.getQualid()
+                                .withName(starImport.getQualid().getName().withSimpleName(simpleName));
+                        String fqn = changedPackage + "." + simpleName;
+                        newQualid = newQualid.withType(findType(fqn, sf));
+                        J.Import explicit = starImport.withQualid(newQualid).withId(randomId());
+                        expanded.add(i++ == 0 ? explicit : explicit.withPrefix(Space.format("\n")));
+                    }
+                    return expanded;
+                }
+                return anImport;
+            }));
+        }
+
+        /**
+         * Checks whether types in the changed package share simple names with types in
+         * any of the other star-imported packages. Uses the scanner-collected type registry
+         * and, if available, the JavaSourceSet classpath.
+         */
+        private boolean hasAmbiguity(JavaSourceFile sf, String changedPackage, Set<String> otherStarPackages) {
+            // Collect all known type names in the changed package
+            Set<String> typesInChangedPackage = new HashSet<>();
+            Set<String> registered = packageTypesMap.get(changedPackage);
+            if (registered != null) {
+                typesInChangedPackage.addAll(registered);
+            }
+
+            // Collect all known type names in the other star-imported packages
+            Set<String> typesInOtherPackages = new HashSet<>();
+            for (String otherPkg : otherStarPackages) {
+                Set<String> otherRegistered = packageTypesMap.get(otherPkg);
+                if (otherRegistered != null) {
+                    typesInOtherPackages.addAll(otherRegistered);
+                }
+            }
+
+            // Also check JavaSourceSet classpath if available
+            Optional<JavaSourceSet> sourceSet = sf.getMarkers().findFirst(JavaSourceSet.class);
+            if (sourceSet.isPresent()) {
+                for (JavaType.FullyQualified fq : sourceSet.get().getClasspath()) {
+                    String pkg = fq.getPackageName();
+                    String className = fq.getClassName();
+                    if (pkg.equals(changedPackage)) {
+                        typesInChangedPackage.add(className);
+                    } else if (otherStarPackages.contains(pkg)) {
+                        typesInOtherPackages.add(className);
+                    }
+                }
+            }
+
+            // Check for overlapping simple names
+            for (String typeName : typesInChangedPackage) {
+                if (typesInOtherPackages.contains(typeName)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private JavaType.FullyQualified findType(String fqn, JavaSourceFile cu) {
+            for (JavaType type : cu.getTypesInUse().getTypesInUse()) {
+                if (type instanceof JavaType.FullyQualified) {
+                    JavaType.FullyQualified fq = (JavaType.FullyQualified) type;
+                    if (TypeUtils.fullyQualifiedNamesAreEqual(fq.getFullyQualifiedName(), fqn)) {
+                        return fq;
+                    }
+                }
+            }
+            Optional<JavaSourceSet> sourceSet = cu.getMarkers().findFirst(JavaSourceSet.class);
+            if (sourceSet.isPresent()) {
+                for (JavaType.FullyQualified fq : sourceSet.get().getClasspath()) {
+                    if (TypeUtils.fullyQualifiedNamesAreEqual(fq.getFullyQualifiedName(), fqn)) {
+                        return fq;
+                    }
+                }
+            }
+            return JavaType.ShallowClass.build(fqn);
         }
 
         private @Nullable JavaType updateType(@Nullable JavaType oldType) {

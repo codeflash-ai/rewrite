@@ -27,6 +27,7 @@ import org.openrewrite.java.tree.TypeUtils;
 import org.openrewrite.test.RecipeSpec;
 import org.openrewrite.test.RewriteTest;
 import org.openrewrite.test.SourceSpec;
+import org.openrewrite.test.TypeValidation;
 
 import java.nio.file.Paths;
 
@@ -661,6 +662,125 @@ class ChangePackageTest implements RewriteTest {
                 assertThat(cu.findType("org.openrewrite.Test")).isEmpty();
                 assertThat(cu.findType("org.openrewrite.test.Test")).isNotEmpty();
             })
+          )
+        );
+    }
+
+    @Test
+    @Issue("https://github.com/moderneinc/customer-requests/issues/1733")
+    void changePackageExpandsStarImportWhenItWouldCreateAmbiguity() {
+        rewriteRun(
+          spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
+                  .typeValidationOptions(TypeValidation.none()),
+          //language=java
+          java(
+            """
+              package origpkg.validation;
+              public @interface ExtraneousAnnotation {}
+              """,
+            """
+              package newpkg.validation;
+              public @interface ExtraneousAnnotation {}
+              """
+          ),
+          //language=java
+          java(
+            """
+              package otherpkg.validation;
+              public @interface NotBlank {}
+              """
+          ),
+          //language=java
+          java(
+            """
+              package newpkg.validation;
+              public @interface NotBlank {}
+              """
+          ),
+          //language=java
+          java(
+            """
+              package xyz;
+
+              import origpkg.validation.*;
+              import otherpkg.validation.*;
+
+              class A {
+                  @NotBlank
+                  private String someField;
+                  @ExtraneousAnnotation
+                  private String otherField;
+              }
+              """,
+            """
+              package xyz;
+
+              import newpkg.validation.ExtraneousAnnotation;
+              import otherpkg.validation.*;
+
+              class A {
+                  @NotBlank
+                  private String someField;
+                  @ExtraneousAnnotation
+                  private String otherField;
+              }
+              """
+          )
+        );
+    }
+
+    @Test
+    @Issue("https://github.com/moderneinc/customer-requests/issues/1733")
+    void changePackagePreservesStarImportWhenNoAmbiguity() {
+        rewriteRun(
+          spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
+                  .typeValidationOptions(TypeValidation.none()),
+          //language=java
+          java(
+            """
+              package origpkg.validation;
+              public @interface ExtraneousAnnotation {}
+              """,
+            """
+              package newpkg.validation;
+              public @interface ExtraneousAnnotation {}
+              """
+          ),
+          //language=java
+          java(
+            """
+              package otherpkg.validation;
+              public @interface NotBlank {}
+              """
+          ),
+          //language=java
+          java(
+            """
+              package xyz;
+
+              import origpkg.validation.*;
+              import otherpkg.validation.*;
+
+              class A {
+                  @NotBlank
+                  private String someField;
+                  @ExtraneousAnnotation
+                  private String otherField;
+              }
+              """,
+            """
+              package xyz;
+
+              import newpkg.validation.*;
+              import otherpkg.validation.*;
+
+              class A {
+                  @NotBlank
+                  private String someField;
+                  @ExtraneousAnnotation
+                  private String otherField;
+              }
+              """
           )
         );
     }
