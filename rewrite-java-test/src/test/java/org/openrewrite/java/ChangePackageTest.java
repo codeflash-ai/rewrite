@@ -673,14 +673,21 @@ class ChangePackageTest implements RewriteTest {
 
     @Test
     void changePackageExpandsStarImportWhenItWouldCreateAmbiguity() {
-        List<Path> classpath = JavaParser.dependenciesFromResources(new InMemoryExecutionContext(),
+        InMemoryExecutionContext ctx = new InMemoryExecutionContext();
+        // Parse with only validation-api (1.1, no NotBlank) and hibernate-validator (5.x, has NotBlank)
+        // so @NotBlank unambiguously resolves from org.hibernate.validator.constraints
+        List<Path> parserClasspath = JavaParser.dependenciesFromResources(ctx,
+          "validation-api", "hibernate-validator");
+        // Full classpath including jakarta.validation-api (2.x, has javax.validation.constraints.NotBlank)
+        // for ambiguity detection after ChangePackage renames javax → jakarta
+        List<Path> fullClasspath = JavaParser.dependenciesFromResources(ctx,
           "validation-api", "jakarta.validation-api", "hibernate-validator");
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("javax.validation.constraints", "jakarta.validation.constraints", true))
                   .typeValidationOptions(TypeValidation.none())
-                  .parser(JavaParser.fromJavaVersion().classpath(classpath))
+                  .parser(JavaParser.fromJavaVersion().classpath(parserClasspath))
                   .beforeRecipe(sourceFiles -> {
-                      JavaSourceSet ss = JavaSourceSet.build("main", classpath);
+                      JavaSourceSet ss = JavaSourceSet.build("main", fullClasspath);
                       for (int i = 0; i < sourceFiles.size(); i++) {
                           SourceFile sf = sourceFiles.get(i);
                           sourceFiles.set(i, sf.withMarkers(sf.getMarkers().computeByType(ss, (o, n) -> n)));
@@ -695,23 +702,22 @@ class ChangePackageTest implements RewriteTest {
               import org.hibernate.validator.constraints.*;
 
               class A {
-                  @NotBlank
+                  @NotNull
                   private String someField;
-                  @NotEmpty
+                  @NotBlank
                   private String otherField;
               }
               """,
             """
               package xyz;
 
-              import jakarta.validation.constraints.NotBlank;
-              import jakarta.validation.constraints.NotEmpty;
+              import jakarta.validation.constraints.NotNull;
               import org.hibernate.validator.constraints.*;
 
               class A {
-                  @NotBlank
+                  @NotNull
                   private String someField;
-                  @NotEmpty
+                  @NotBlank
                   private String otherField;
               }
               """
@@ -742,9 +748,9 @@ class ChangePackageTest implements RewriteTest {
               import javax.validation.constraints.*;
 
               class A {
-                  @NotBlank
+                  @NotNull
                   private String someField;
-                  @NotEmpty
+                  @Size(max = 100)
                   private String otherField;
               }
               """,
@@ -754,9 +760,9 @@ class ChangePackageTest implements RewriteTest {
               import jakarta.validation.constraints.*;
 
               class A {
-                  @NotBlank
+                  @NotNull
                   private String someField;
-                  @NotEmpty
+                  @Size(max = 100)
                   private String otherField;
               }
               """

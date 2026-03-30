@@ -272,16 +272,18 @@ public class ChangePackage extends Recipe {
                 }
 
                 // Expand changed star imports that would create ambiguity with other star imports
-                sf = maybeExpandStarImport(sf, newPackageName);
+                sf = maybeExpandStarImport(sf, newPackageName, oldPackageName);
                 if (changingTo != null && !changingTo.equals(newPackageName)) {
-                    sf = maybeExpandStarImport(sf, changingTo);
+                    String oldSubPkg = oldPackageName + changingTo.substring(newPackageName.length());
+                    sf = maybeExpandStarImport(sf, changingTo, oldSubPkg);
                 }
                 if (Boolean.TRUE.equals(recursive)) {
                     for (J.Import anImport : sf.getImports()) {
                         if (!anImport.isStatic() && "*".equals(anImport.getQualid().getSimpleName())) {
                             String pkg = anImport.getPackageName();
                             if (pkg.startsWith(newPackageName + ".")) {
-                                sf = maybeExpandStarImport(sf, pkg);
+                                String oldPkg = oldPackageName + pkg.substring(newPackageName.length());
+                                sf = maybeExpandStarImport(sf, pkg, oldPkg);
                             }
                         }
                     }
@@ -297,8 +299,11 @@ public class ChangePackage extends Recipe {
          * If a star import for {@code changedPackage} exists alongside other star imports,
          * and types from {@code changedPackage} share simple names with types from those
          * other packages, expand the star import into explicit imports to avoid ambiguity.
+         *
+         * @param changedPackage the new package name (after rename)
+         * @param originalPackage the old package name (before rename), used to find types on classpath
          */
-        private JavaSourceFile maybeExpandStarImport(JavaSourceFile sf, String changedPackage) {
+        private JavaSourceFile maybeExpandStarImport(JavaSourceFile sf, String changedPackage, String originalPackage) {
             J.Import changedStarImport = null;
             Set<String> otherStarPackages = new LinkedHashSet<>();
             for (J.Import anImport : sf.getImports()) {
@@ -316,44 +321,32 @@ public class ChangePackage extends Recipe {
                 return sf;
             }
 
-            if (!hasAmbiguity(sf, changedPackage, otherStarPackages)) {
+            if (!hasAmbiguity(sf, changedPackage, originalPackage, otherStarPackages)) {
                 return sf;
             }
 
-            // Collect types from the changed package that exist on the classpath
-            Set<String> typesInChangedPackage = new TreeSet<>();
-            Optional<JavaSourceSet> sourceSet = sf.getMarkers().findFirst(JavaSourceSet.class);
-            if (sourceSet.isPresent()) {
-                for (JavaType.FullyQualified fq : sourceSet.get().getClasspath()) {
+            // Collect simple names of types used from the changed package
+            Set<String> usedFromChangedPackage = new TreeSet<>();
+            for (JavaType type : sf.getTypesInUse().getTypesInUse()) {
+                if (type instanceof JavaType.FullyQualified) {
+                    JavaType.FullyQualified fq = (JavaType.FullyQualified) type;
                     if (fq.getPackageName().equals(changedPackage)) {
-                        typesInChangedPackage.add(fq.getClassName());
+                        usedFromChangedPackage.add(fq.getClassName());
                     }
                 }
             }
 
-            // Determine which type names from the changed package are actually referenced in the source
-            Set<String> referencedSimpleNames = new TreeSet<>();
-            new JavaIsoVisitor<Set<String>>() {
-                @Override
-                public J.Identifier visitIdentifier(J.Identifier ident, Set<String> names) {
-                    if (typesInChangedPackage.contains(ident.getSimpleName())) {
-                        names.add(ident.getSimpleName());
-                    }
-                    return super.visitIdentifier(ident, names);
-                }
-            }.visit(sf, referencedSimpleNames);
-
-            if (referencedSimpleNames.isEmpty()) {
+            if (usedFromChangedPackage.isEmpty()) {
                 return sf;
             }
 
-            // Expand the changed star import into explicit imports for referenced types
+            // Expand the changed star import into explicit imports for used types
             J.Import starImport = changedStarImport;
             return sf.withImports(ListUtils.flatMap(sf.getImports(), anImport -> {
                 if (anImport == starImport) {
-                    List<J.Import> expanded = new ArrayList<>(referencedSimpleNames.size());
+                    List<J.Import> expanded = new ArrayList<>(usedFromChangedPackage.size());
                     int i = 0;
-                    for (String simpleName : referencedSimpleNames) {
+                    for (String simpleName : usedFromChangedPackage) {
                         J.FieldAccess newQualid = starImport.getQualid()
                                 .withName(starImport.getQualid().getName().withSimpleName(simpleName));
                         String fqn = changedPackage + "." + simpleName;
@@ -370,8 +363,10 @@ public class ChangePackage extends Recipe {
         /**
          * Checks whether types in the changed package share simple names with types in
          * any of the other star-imported packages, using the JavaSourceSet classpath.
+         * Checks both the new package name and the original package name, since the
+         * classpath may still have types under the old package name.
          */
-        private boolean hasAmbiguity(JavaSourceFile sf, String changedPackage, Set<String> otherStarPackages) {
+        private boolean hasAmbiguity(JavaSourceFile sf, String changedPackage, String originalPackage, Set<String> otherStarPackages) {
             Optional<JavaSourceSet> sourceSet = sf.getMarkers().findFirst(JavaSourceSet.class);
             if (!sourceSet.isPresent()) {
                 return false;
@@ -382,7 +377,7 @@ public class ChangePackage extends Recipe {
             for (JavaType.FullyQualified fq : sourceSet.get().getClasspath()) {
                 String pkg = fq.getPackageName();
                 String className = fq.getClassName();
-                if (pkg.equals(changedPackage)) {
+                if (pkg.equals(changedPackage) || pkg.equals(originalPackage)) {
                     typesInChangedPackage.add(className);
                 } else if (otherStarPackages.contains(pkg)) {
                     typesInOtherPackages.add(className);
