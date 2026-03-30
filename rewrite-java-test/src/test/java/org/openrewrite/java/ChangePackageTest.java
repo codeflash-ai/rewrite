@@ -18,7 +18,7 @@ package org.openrewrite.java;
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.Test;
 import org.openrewrite.DocumentExample;
-import org.openrewrite.Issue;
+
 import org.openrewrite.SourceFile;
 import org.openrewrite.test.UncheckedConsumer;
 import org.openrewrite.java.marker.JavaSourceSet;
@@ -674,7 +674,7 @@ class ChangePackageTest implements RewriteTest {
     }
 
     @Test
-    @Issue("https://github.com/moderneinc/customer-requests/issues/1733")
+
     void changePackageExpandsStarImportWhenItWouldCreateAmbiguity() {
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
@@ -738,7 +738,7 @@ class ChangePackageTest implements RewriteTest {
     }
 
     @Test
-    @Issue("https://github.com/moderneinc/customer-requests/issues/1733")
+
     void changePackagePreservesStarImportWhenNoAmbiguity() {
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
