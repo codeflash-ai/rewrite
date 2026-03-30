@@ -18,9 +18,9 @@ package org.openrewrite.java;
 import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.Test;
 import org.openrewrite.DocumentExample;
+import org.openrewrite.InMemoryExecutionContext;
 import org.openrewrite.Issue;
 import org.openrewrite.SourceFile;
-import org.openrewrite.internal.ListUtils;
 import org.openrewrite.java.marker.JavaSourceSet;
 import org.openrewrite.java.search.FindTypes;
 import org.openrewrite.java.tree.J;
@@ -32,8 +32,9 @@ import org.openrewrite.test.RewriteTest;
 import org.openrewrite.test.SourceSpec;
 import org.openrewrite.test.TypeValidation;
 
+import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -670,75 +671,47 @@ class ChangePackageTest implements RewriteTest {
         );
     }
 
-    @SuppressWarnings("ConstantConditions")
-    private static void addTypesToSourceSet(List<SourceFile> sourceFiles, String... typeNames) {
-        List<JavaType.FullyQualified> types = new ArrayList<>();
-        for (String typeName : typeNames) {
-            types.add(JavaType.ShallowClass.build(typeName));
-        }
-        for (int i = 0; i < sourceFiles.size(); i++) {
-            SourceFile sf = sourceFiles.get(i);
-            JavaSourceSet ss = sf.getMarkers().findFirst(JavaSourceSet.class)
-                    .map(existing -> existing.withClasspath(ListUtils.concatAll(existing.getClasspath(), types)))
-                    .orElseGet(() -> new JavaSourceSet(UUID.randomUUID(), "main", types, Collections.emptyMap()));
-            sourceFiles.set(i, sf.withMarkers(sf.getMarkers().computeByType(ss, (orig, upd) -> upd)));
-        }
-    }
-
     @Test
     void changePackageExpandsStarImportWhenItWouldCreateAmbiguity() {
+        List<Path> classpath = JavaParser.dependenciesFromResources(new InMemoryExecutionContext(),
+          "validation-api", "jakarta.validation-api", "hibernate-validator");
         rewriteRun(
-          spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
+          spec -> spec.recipe(new ChangePackage("javax.validation.constraints", "jakarta.validation.constraints", true))
                   .typeValidationOptions(TypeValidation.none())
-                  .parser(JavaParser.fromJavaVersion().dependsOn(
-                    """
-                      package origpkg.validation;
-                      public @interface ExtraneousAnnotation {}
-                      """,
-                    """
-                      package newpkg.validation;
-                      public @interface ExtraneousAnnotation {}
-                      """,
-                    """
-                      package newpkg.validation;
-                      public @interface NotBlank {}
-                      """,
-                    """
-                      package otherpkg.validation;
-                      public @interface NotBlank {}
-                      """
-                  ))
-                  .beforeRecipe(sourceFiles -> addTypesToSourceSet(sourceFiles,
-                    "origpkg.validation.ExtraneousAnnotation",
-                    "newpkg.validation.ExtraneousAnnotation",
-                    "newpkg.validation.NotBlank",
-                    "otherpkg.validation.NotBlank"
-                  )),
+                  .parser(JavaParser.fromJavaVersion().classpath(classpath))
+                  .beforeRecipe(sourceFiles -> {
+                      JavaSourceSet ss = JavaSourceSet.build("main", classpath);
+                      for (int i = 0; i < sourceFiles.size(); i++) {
+                          SourceFile sf = sourceFiles.get(i);
+                          sourceFiles.set(i, sf.withMarkers(sf.getMarkers().computeByType(ss, (o, n) -> n)));
+                      }
+                  }),
           //language=java
           java(
             """
               package xyz;
 
-              import origpkg.validation.*;
-              import otherpkg.validation.*;
+              import javax.validation.constraints.*;
+              import org.hibernate.validator.constraints.*;
 
               class A {
                   @NotBlank
                   private String someField;
-                  @ExtraneousAnnotation
+                  @NotEmpty
                   private String otherField;
               }
               """,
             """
               package xyz;
 
-              import newpkg.validation.ExtraneousAnnotation;
-              import otherpkg.validation.*;
+              import jakarta.validation.constraints.NotBlank;
+              import jakarta.validation.constraints.NotEmpty;
+              import org.hibernate.validator.constraints.*;
 
               class A {
                   @NotBlank
                   private String someField;
-                  @ExtraneousAnnotation
+                  @NotEmpty
                   private String otherField;
               }
               """
@@ -748,48 +721,42 @@ class ChangePackageTest implements RewriteTest {
 
     @Test
     void changePackagePreservesStarImportWhenNoAmbiguity() {
+        List<Path> classpath = JavaParser.dependenciesFromResources(new InMemoryExecutionContext(),
+          "validation-api", "jakarta.validation-api");
         rewriteRun(
-          spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
+          spec -> spec.recipe(new ChangePackage("javax.validation.constraints", "jakarta.validation.constraints", true))
                   .typeValidationOptions(TypeValidation.none())
-                  .parser(JavaParser.fromJavaVersion().dependsOn(
-                    """
-                      package origpkg.validation;
-                      public @interface ExtraneousAnnotation {}
-                      """,
-                    """
-                      package otherpkg.validation;
-                      public @interface NotBlank {}
-                      """
-                  ))
-                  .beforeRecipe(sourceFiles -> addTypesToSourceSet(sourceFiles,
-                    "origpkg.validation.ExtraneousAnnotation",
-                    "otherpkg.validation.NotBlank"
-                  )),
+                  .parser(JavaParser.fromJavaVersion().classpath(classpath))
+                  .beforeRecipe(sourceFiles -> {
+                      JavaSourceSet ss = JavaSourceSet.build("main", classpath);
+                      for (int i = 0; i < sourceFiles.size(); i++) {
+                          SourceFile sf = sourceFiles.get(i);
+                          sourceFiles.set(i, sf.withMarkers(sf.getMarkers().computeByType(ss, (o, n) -> n)));
+                      }
+                  }),
           //language=java
           java(
             """
               package xyz;
 
-              import origpkg.validation.*;
-              import otherpkg.validation.*;
+              import javax.validation.constraints.*;
 
               class A {
                   @NotBlank
                   private String someField;
-                  @ExtraneousAnnotation
+                  @NotEmpty
                   private String otherField;
               }
               """,
             """
               package xyz;
 
-              import newpkg.validation.*;
-              import otherpkg.validation.*;
+              import jakarta.validation.constraints.*;
 
               class A {
                   @NotBlank
                   private String someField;
-                  @ExtraneousAnnotation
+                  @NotEmpty
                   private String otherField;
               }
               """

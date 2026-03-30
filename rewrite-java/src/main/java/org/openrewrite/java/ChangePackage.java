@@ -316,32 +316,44 @@ public class ChangePackage extends Recipe {
                 return sf;
             }
 
-            // Collect simple names of types used from the changed package
-            Set<String> usedFromChangedPackage = new TreeSet<>();
-            for (JavaType type : sf.getTypesInUse().getTypesInUse()) {
-                if (type instanceof JavaType.FullyQualified) {
-                    JavaType.FullyQualified fq = (JavaType.FullyQualified) type;
-                    if (fq.getPackageName().equals(changedPackage)) {
-                        usedFromChangedPackage.add(fq.getClassName());
-                    }
-                }
-            }
-
-            if (usedFromChangedPackage.isEmpty()) {
-                return sf;
-            }
-
             if (!hasAmbiguity(sf, changedPackage, otherStarPackages)) {
                 return sf;
             }
 
-            // Expand the changed star import into explicit imports
+            // Collect types from the changed package that exist on the classpath
+            Set<String> typesInChangedPackage = new TreeSet<>();
+            Optional<JavaSourceSet> sourceSet = sf.getMarkers().findFirst(JavaSourceSet.class);
+            if (sourceSet.isPresent()) {
+                for (JavaType.FullyQualified fq : sourceSet.get().getClasspath()) {
+                    if (fq.getPackageName().equals(changedPackage)) {
+                        typesInChangedPackage.add(fq.getClassName());
+                    }
+                }
+            }
+
+            // Determine which type names from the changed package are actually referenced in the source
+            Set<String> referencedSimpleNames = new TreeSet<>();
+            new JavaIsoVisitor<Set<String>>() {
+                @Override
+                public J.Identifier visitIdentifier(J.Identifier ident, Set<String> names) {
+                    if (typesInChangedPackage.contains(ident.getSimpleName())) {
+                        names.add(ident.getSimpleName());
+                    }
+                    return super.visitIdentifier(ident, names);
+                }
+            }.visit(sf, referencedSimpleNames);
+
+            if (referencedSimpleNames.isEmpty()) {
+                return sf;
+            }
+
+            // Expand the changed star import into explicit imports for referenced types
             J.Import starImport = changedStarImport;
             return sf.withImports(ListUtils.flatMap(sf.getImports(), anImport -> {
                 if (anImport == starImport) {
-                    List<J.Import> expanded = new ArrayList<>(usedFromChangedPackage.size());
+                    List<J.Import> expanded = new ArrayList<>(referencedSimpleNames.size());
                     int i = 0;
-                    for (String simpleName : usedFromChangedPackage) {
+                    for (String simpleName : referencedSimpleNames) {
                         J.FieldAccess newQualid = starImport.getQualid()
                                 .withName(starImport.getQualid().getName().withSimpleName(simpleName));
                         String fqn = changedPackage + "." + simpleName;

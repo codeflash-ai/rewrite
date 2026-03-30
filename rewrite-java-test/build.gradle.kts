@@ -4,6 +4,9 @@ plugins {
 
 recipeDependencies {
     parserClasspath("jakarta.persistence:jakarta.persistence-api:3.1.0")
+    parserClasspath("jakarta.validation:jakarta.validation-api:3.0.2")
+    parserClasspath("javax.validation:validation-api:2.0.1.Final")
+    parserClasspath("org.hibernate.validator:hibernate-validator:6.2.5.Final")
 }
 
 dependencies {
