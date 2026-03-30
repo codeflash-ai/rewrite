@@ -19,8 +19,12 @@ import org.intellij.lang.annotations.Language;
 import org.junit.jupiter.api.Test;
 import org.openrewrite.DocumentExample;
 import org.openrewrite.Issue;
+import org.openrewrite.SourceFile;
+import org.openrewrite.test.UncheckedConsumer;
+import org.openrewrite.java.marker.JavaSourceSet;
 import org.openrewrite.java.search.FindTypes;
 import org.openrewrite.java.tree.J;
+import org.openrewrite.java.tree.JavaSourceFile;
 import org.openrewrite.java.tree.JavaType;
 import org.openrewrite.java.tree.NameTree;
 import org.openrewrite.java.tree.TypeUtils;
@@ -30,6 +34,9 @@ import org.openrewrite.test.SourceSpec;
 import org.openrewrite.test.TypeValidation;
 
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -671,7 +678,8 @@ class ChangePackageTest implements RewriteTest {
     void changePackageExpandsStarImportWhenItWouldCreateAmbiguity() {
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
-                  .typeValidationOptions(TypeValidation.none()),
+                  .typeValidationOptions(TypeValidation.none())
+                  .beforeRecipe(withSourceTypesOnClasspath()),
           //language=java
           java(
             """
@@ -734,7 +742,8 @@ class ChangePackageTest implements RewriteTest {
     void changePackagePreservesStarImportWhenNoAmbiguity() {
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("origpkg.validation", "newpkg.validation", true))
-                  .typeValidationOptions(TypeValidation.none()),
+                  .typeValidationOptions(TypeValidation.none())
+                  .beforeRecipe(withSourceTypesOnClasspath()),
           //language=java
           java(
             """
@@ -2031,5 +2040,41 @@ class ChangePackageTest implements RewriteTest {
               """
           )
         );
+    }
+
+    /**
+     * Enrich each source file's JavaSourceSet marker with types declared in other source files,
+     * so that classpath-based ambiguity detection works in tests where types come from source
+     * files rather than JARs.
+     */
+    private static UncheckedConsumer<List<SourceFile>> withSourceTypesOnClasspath() {
+        return sourceFiles -> {
+            List<JavaType.FullyQualified> sourceTypes = new ArrayList<>();
+            for (SourceFile sf : sourceFiles) {
+                if (sf instanceof JavaSourceFile) {
+                    for (J.ClassDeclaration classDecl : ((JavaSourceFile) sf).getClasses()) {
+                        JavaType.FullyQualified type = classDecl.getType();
+                        if (type != null) {
+                            sourceTypes.add(type);
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < sourceFiles.size(); i++) {
+                SourceFile sf = sourceFiles.get(i);
+                Optional<JavaSourceSet> maybeSourceSet = sf.getMarkers().findFirst(JavaSourceSet.class);
+                JavaSourceSet ss;
+                if (maybeSourceSet.isPresent()) {
+                    ss = maybeSourceSet.get();
+                    List<JavaType.FullyQualified> enriched = new ArrayList<>(ss.getClasspath());
+                    enriched.addAll(sourceTypes);
+                    ss = ss.withClasspath(enriched);
+                } else {
+                    ss = new JavaSourceSet(java.util.UUID.randomUUID(), "main", sourceTypes, java.util.Collections.emptyMap());
+                }
+                sourceFiles.set(i, sf.withMarkers(
+                  sf.getMarkers().computeByType(ss, (orig, upd) -> upd)));
+            }
+        };
     }
 }

@@ -28,7 +28,6 @@ import org.openrewrite.trait.Reference;
 
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static java.util.Objects.requireNonNull;
 import static org.openrewrite.Tree.randomId;
@@ -44,7 +43,7 @@ import static org.openrewrite.Tree.randomId;
  */
 @Value
 @EqualsAndHashCode(callSuper = false)
-public class ChangePackage extends ScanningRecipe<Map<String, Set<String>>> {
+public class ChangePackage extends Recipe {
     @Option(displayName = "Old package name",
             description = "The package name to replace.",
             example = "com.yourorg.foo")
@@ -79,36 +78,7 @@ public class ChangePackage extends ScanningRecipe<Map<String, Set<String>>> {
     }
 
     @Override
-    public Map<String, Set<String>> getInitialValue(ExecutionContext ctx) {
-        return new ConcurrentHashMap<>();
-    }
-
-    @Override
-    public TreeVisitor<?, ExecutionContext> getScanner(Map<String, Set<String>> packageTypesMap) {
-        return new TreeVisitor<Tree, ExecutionContext>() {
-            @Override
-            public @Nullable Tree visit(@Nullable Tree tree, ExecutionContext ctx) {
-                if (tree instanceof JavaSourceFile) {
-                    JavaSourceFile cu = (JavaSourceFile) tree;
-                    if (cu.getPackageDeclaration() != null) {
-                        String pkg = cu.getPackageDeclaration().getExpression()
-                                .printTrimmed(new Cursor(getCursor(), cu)).replaceAll("\\s", "");
-                        for (J.ClassDeclaration classDecl : cu.getClasses()) {
-                            if (classDecl.getSimpleName() != null && !classDecl.getSimpleName().isEmpty()) {
-                                packageTypesMap
-                                        .computeIfAbsent(pkg, k -> ConcurrentHashMap.newKeySet())
-                                        .add(classDecl.getSimpleName());
-                            }
-                        }
-                    }
-                }
-                return tree;
-            }
-        };
-    }
-
-    @Override
-    public TreeVisitor<?, ExecutionContext> getVisitor(Map<String, Set<String>> packageTypesMap) {
+    public TreeVisitor<?, ExecutionContext> getVisitor() {
         TreeVisitor<?, ExecutionContext> condition = new TreeVisitor<Tree, ExecutionContext>() {
             @Override
             public @Nullable Tree preVisit(@Nullable Tree tree, ExecutionContext ctx) {
@@ -162,7 +132,7 @@ public class ChangePackage extends ScanningRecipe<Map<String, Set<String>>> {
             public @Nullable Tree preVisit(@Nullable Tree tree, ExecutionContext ctx) {
                 stopAfterPreVisit();
                 if (tree instanceof JavaSourceFile) {
-                    return new JavaChangePackageVisitor(packageTypesMap).visit(tree, ctx, requireNonNull(getCursor().getParent()));
+                    return new JavaChangePackageVisitor().visit(tree, ctx, requireNonNull(getCursor().getParent()));
                 } else if (tree instanceof SourceFileWithReferences) {
                     SourceFileWithReferences sourceFile = (SourceFileWithReferences) tree;
                     SourceFileWithReferences.References references = sourceFile.getReferences();
@@ -185,11 +155,6 @@ public class ChangePackage extends ScanningRecipe<Map<String, Set<String>>> {
 
         private final Map<JavaType, JavaType> oldNameToChangedType = new IdentityHashMap<>();
         private final JavaType.Class newPackageType = JavaType.ShallowClass.build(newPackageName);
-        private final Map<String, Set<String>> packageTypesMap;
-
-        JavaChangePackageVisitor(Map<String, Set<String>> packageTypesMap) {
-            this.packageTypesMap = packageTypesMap;
-        }
 
         @Override
         public J visitFieldAccess(J.FieldAccess fieldAccess, ExecutionContext ctx) {
@@ -392,41 +357,26 @@ public class ChangePackage extends ScanningRecipe<Map<String, Set<String>>> {
 
         /**
          * Checks whether types in the changed package share simple names with types in
-         * any of the other star-imported packages. Uses the scanner-collected type registry
-         * and, if available, the JavaSourceSet classpath.
+         * any of the other star-imported packages, using the JavaSourceSet classpath.
          */
         private boolean hasAmbiguity(JavaSourceFile sf, String changedPackage, Set<String> otherStarPackages) {
-            // Collect all known type names in the changed package
-            Set<String> typesInChangedPackage = new HashSet<>();
-            Set<String> registered = packageTypesMap.get(changedPackage);
-            if (registered != null) {
-                typesInChangedPackage.addAll(registered);
-            }
-
-            // Collect all known type names in the other star-imported packages
-            Set<String> typesInOtherPackages = new HashSet<>();
-            for (String otherPkg : otherStarPackages) {
-                Set<String> otherRegistered = packageTypesMap.get(otherPkg);
-                if (otherRegistered != null) {
-                    typesInOtherPackages.addAll(otherRegistered);
-                }
-            }
-
-            // Also check JavaSourceSet classpath if available
             Optional<JavaSourceSet> sourceSet = sf.getMarkers().findFirst(JavaSourceSet.class);
-            if (sourceSet.isPresent()) {
-                for (JavaType.FullyQualified fq : sourceSet.get().getClasspath()) {
-                    String pkg = fq.getPackageName();
-                    String className = fq.getClassName();
-                    if (pkg.equals(changedPackage)) {
-                        typesInChangedPackage.add(className);
-                    } else if (otherStarPackages.contains(pkg)) {
-                        typesInOtherPackages.add(className);
-                    }
+            if (!sourceSet.isPresent()) {
+                return false;
+            }
+
+            Set<String> typesInChangedPackage = new HashSet<>();
+            Set<String> typesInOtherPackages = new HashSet<>();
+            for (JavaType.FullyQualified fq : sourceSet.get().getClasspath()) {
+                String pkg = fq.getPackageName();
+                String className = fq.getClassName();
+                if (pkg.equals(changedPackage)) {
+                    typesInChangedPackage.add(className);
+                } else if (otherStarPackages.contains(pkg)) {
+                    typesInOtherPackages.add(className);
                 }
             }
 
-            // Check for overlapping simple names
             for (String typeName : typesInChangedPackage) {
                 if (typesInOtherPackages.contains(typeName)) {
                     return true;
