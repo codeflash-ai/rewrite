@@ -31,11 +31,12 @@ import org.openrewrite.test.SourceSpec;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.List;
 
+import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
+import static org.openrewrite.java.Assertions.addTypesToSourceSet;
 import static org.openrewrite.java.Assertions.java;
 import static org.openrewrite.java.Assertions.srcMainJava;
 import static org.openrewrite.properties.Assertions.properties;
@@ -679,8 +680,8 @@ class ChangePackageTest implements RewriteTest {
           spec -> spec.recipe(new ChangePackage("javax.validation.constraints", "jakarta.validation.constraints", true))
                   .parser(JavaParser.fromJavaVersion().classpathFromResources(ctx,
                     "validation-api", "hibernate-validator"))
-                  .beforeRecipe(Assertions.addTypesToSourceSet("main",
-                    Collections.emptyList(), classpath)),
+                  .beforeRecipe(addTypesToSourceSet("main",
+                    emptyList(), classpath)),
           srcMainJava(
             java(
               """
@@ -723,8 +724,8 @@ class ChangePackageTest implements RewriteTest {
           spec -> spec.recipe(new ChangePackage("javax.validation.constraints", "jakarta.validation.constraints", true))
                   .parser(JavaParser.fromJavaVersion().classpathFromResources(ctx,
                     "validation-api"))
-                  .beforeRecipe(Assertions.addTypesToSourceSet("main",
-                    Collections.emptyList(), classpath)),
+                  .beforeRecipe(addTypesToSourceSet("main",
+                    emptyList(), classpath)),
           srcMainJava(
             java(
               """
