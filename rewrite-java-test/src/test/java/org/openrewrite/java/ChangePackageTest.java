@@ -20,8 +20,6 @@ import org.junit.jupiter.api.Test;
 import org.openrewrite.DocumentExample;
 import org.openrewrite.InMemoryExecutionContext;
 import org.openrewrite.Issue;
-import org.openrewrite.SourceFile;
-import org.openrewrite.java.marker.JavaSourceSet;
 import org.openrewrite.java.search.FindTypes;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
@@ -30,15 +28,16 @@ import org.openrewrite.java.tree.TypeUtils;
 import org.openrewrite.test.RecipeSpec;
 import org.openrewrite.test.RewriteTest;
 import org.openrewrite.test.SourceSpec;
-import org.openrewrite.test.TypeValidation;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.openrewrite.java.Assertions.java;
+import static org.openrewrite.java.Assertions.srcMainJava;
 import static org.openrewrite.properties.Assertions.properties;
 import static org.openrewrite.xml.Assertions.xml;
 import static org.openrewrite.yaml.Assertions.yaml;
@@ -674,98 +673,85 @@ class ChangePackageTest implements RewriteTest {
     @Test
     void changePackageExpandsStarImportWhenItWouldCreateAmbiguity() {
         InMemoryExecutionContext ctx = new InMemoryExecutionContext();
-        // Parse with only validation-api (1.1, no NotBlank) and hibernate-validator (5.x, has NotBlank)
-        // so @NotBlank unambiguously resolves from org.hibernate.validator.constraints
-        List<Path> parserClasspath = JavaParser.dependenciesFromResources(ctx,
-          "validation-api", "hibernate-validator");
-        // Full classpath including jakarta.validation-api (2.x, has javax.validation.constraints.NotBlank)
-        // for ambiguity detection after ChangePackage renames javax → jakarta
-        List<Path> fullClasspath = JavaParser.dependenciesFromResources(ctx,
+        List<Path> classpath = JavaParser.dependenciesFromResources(ctx,
           "validation-api", "jakarta.validation-api", "hibernate-validator");
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("javax.validation.constraints", "jakarta.validation.constraints", true))
-                  .typeValidationOptions(TypeValidation.none())
-                  .parser(JavaParser.fromJavaVersion().classpath(parserClasspath))
-                  .beforeRecipe(sourceFiles -> {
-                      JavaSourceSet ss = JavaSourceSet.build("main", fullClasspath);
-                      for (int i = 0; i < sourceFiles.size(); i++) {
-                          SourceFile sf = sourceFiles.get(i);
-                          sourceFiles.set(i, sf.withMarkers(sf.getMarkers().computeByType(ss, (o, n) -> n)));
-                      }
-                  }),
-          //language=java
-          java(
-            """
-              package xyz;
-
-              import javax.validation.constraints.*;
-              import org.hibernate.validator.constraints.*;
-
-              class A {
-                  @NotNull
-                  private String someField;
-                  @NotBlank
-                  private String otherField;
-              }
-              """,
-            """
-              package xyz;
-
-              import jakarta.validation.constraints.NotNull;
-              import org.hibernate.validator.constraints.*;
-
-              class A {
-                  @NotNull
-                  private String someField;
-                  @NotBlank
-                  private String otherField;
-              }
+                  .parser(JavaParser.fromJavaVersion().classpathFromResources(ctx,
+                    "validation-api", "hibernate-validator"))
+                  .beforeRecipe(Assertions.addTypesToSourceSet("main",
+                    Collections.emptyList(), classpath)),
+          srcMainJava(
+            java(
               """
+                package xyz;
+
+                import javax.validation.constraints.*;
+                import org.hibernate.validator.constraints.*;
+
+                class A {
+                    @NotNull
+                    private String someField;
+                    @NotEmpty
+                    private String otherField;
+                }
+                """,
+              """
+                package xyz;
+
+                import jakarta.validation.constraints.NotNull;
+                import org.hibernate.validator.constraints.*;
+
+                class A {
+                    @NotNull
+                    private String someField;
+                    @NotEmpty
+                    private String otherField;
+                }
+                """
+            )
           )
         );
     }
 
     @Test
     void changePackagePreservesStarImportWhenNoAmbiguity() {
-        List<Path> classpath = JavaParser.dependenciesFromResources(new InMemoryExecutionContext(),
+        InMemoryExecutionContext ctx = new InMemoryExecutionContext();
+        List<Path> classpath = JavaParser.dependenciesFromResources(ctx,
           "validation-api", "jakarta.validation-api");
         rewriteRun(
           spec -> spec.recipe(new ChangePackage("javax.validation.constraints", "jakarta.validation.constraints", true))
-                  .typeValidationOptions(TypeValidation.none())
-                  .parser(JavaParser.fromJavaVersion().classpath(classpath))
-                  .beforeRecipe(sourceFiles -> {
-                      JavaSourceSet ss = JavaSourceSet.build("main", classpath);
-                      for (int i = 0; i < sourceFiles.size(); i++) {
-                          SourceFile sf = sourceFiles.get(i);
-                          sourceFiles.set(i, sf.withMarkers(sf.getMarkers().computeByType(ss, (o, n) -> n)));
-                      }
-                  }),
-          //language=java
-          java(
-            """
-              package xyz;
-
-              import javax.validation.constraints.*;
-
-              class A {
-                  @NotNull
-                  private String someField;
-                  @Size(max = 100)
-                  private String otherField;
-              }
-              """,
-            """
-              package xyz;
-
-              import jakarta.validation.constraints.*;
-
-              class A {
-                  @NotNull
-                  private String someField;
-                  @Size(max = 100)
-                  private String otherField;
-              }
+                  .parser(JavaParser.fromJavaVersion().classpathFromResources(ctx,
+                    "validation-api"))
+                  .beforeRecipe(Assertions.addTypesToSourceSet("main",
+                    Collections.emptyList(), classpath)),
+          srcMainJava(
+            java(
               """
+                package xyz;
+
+                import javax.validation.constraints.*;
+
+                class A {
+                    @NotNull
+                    private String someField;
+                    @Size(max = 100)
+                    private String otherField;
+                }
+                """,
+              """
+                package xyz;
+
+                import jakarta.validation.constraints.*;
+
+                class A {
+                    @NotNull
+                    private String someField;
+                    @Size(max = 100)
+                    private String otherField;
+                }
+                """
+            )
           )
         );
     }
