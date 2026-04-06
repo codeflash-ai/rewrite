@@ -618,14 +618,16 @@ public class StringUtils {
         }
 
         int length = name.length();
-        StringBuilder sb = new StringBuilder(length);
+        // Pre-size to reduce resizing for common expansions (e.g. '*' -> "[^.]*")
+        StringBuilder sb = new StringBuilder(Math.max(16, length * 2));
         char prev = 0;
         for (int i = 0; i < length; i++) {
             boolean isLast = i == length - 1;
             char c = name.charAt(i);
+            char next = isLast ? 0 : name.charAt(i + 1);
             switch (c) {
                 case '.':
-                    if (prev != '.' && (isLast || name.charAt(i + 1) != '.')) {
+                    if (prev != '.' && (isLast || next != '.')) {
                         sb.append("[.$]");
                     } else if (prev == '.') {
                         sb.append("\\.(.+\\.)?");
