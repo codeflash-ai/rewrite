@@ -594,7 +594,12 @@ public class StringUtils {
         }
         int sz = str.length();
         for (int i = 0; i < sz; i++) {
-            if (!Character.isDigit(str.charAt(i))) {
+            char c = str.charAt(i);
+            // fast path for common ASCII digits to avoid expensive Unicode checks
+            if (c >= '0' && c <= '9') {
+                continue;
+            }
+            if (!Character.isDigit(c)) {
                 return false;
             }
         }
