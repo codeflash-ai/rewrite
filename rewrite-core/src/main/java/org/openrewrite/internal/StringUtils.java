@@ -311,8 +311,11 @@ public class StringUtils {
      * or <code>-1</code> if no character in the string matches the predicate.
      */
     public static int indexOf(String text, int fromIndex, Predicate<Character> test) {
-        for (int i = fromIndex; i < text.length(); i++) {
-            if (test.test(text.charAt(i))) {
+        int len = text.length();
+        Predicate<Character> t = test;
+        for (int i = fromIndex; i < len; i++) {
+            char c = text.charAt(i);
+            if (t.test(c)) {
                 return i;
             }
         }
