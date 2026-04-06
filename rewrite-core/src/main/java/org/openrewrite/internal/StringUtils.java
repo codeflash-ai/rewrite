@@ -177,8 +177,10 @@ public class StringUtils {
         if (string == null || string.isEmpty()) {
             return true;
         }
-        for (int i = 0; i < string.length(); i++) {
-            if (!Character.isWhitespace(string.charAt(i))) {
+        int len = string.length();
+        for (int i = 0; i < len; i++) {
+            char c = string.charAt(i);
+            if (!Character.isWhitespace(c)) {
                 return false;
             }
         }
