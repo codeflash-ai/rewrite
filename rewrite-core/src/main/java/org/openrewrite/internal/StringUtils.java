@@ -735,7 +735,19 @@ public class StringUtils {
     }
 
     public static boolean hasLineBreak(@Nullable String s) {
-        return s != null && LINE_BREAK.matcher(s).find();
+        if (s == null) {
+            return false;
+        }
+        // Single-pass scan for Unicode line break characters to avoid regex overhead.
+        int len = s.length();
+        for (int i = 0; i < len; i++) {
+            char c = s.charAt(i);
+            if (c == '\n' || c == '\r' || c == '\u000B' || c == '\u000C' ||
+                c == '\u0085' || c == '\u2028' || c == '\u2029') {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean containsWhitespace(String s) {
