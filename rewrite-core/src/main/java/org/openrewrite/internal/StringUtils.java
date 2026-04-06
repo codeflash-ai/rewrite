@@ -423,13 +423,25 @@ public class StringUtils {
         int strIdxStart = 0;
         int strIdxEnd = str.length() - 1;
 
+        // Convert both pattern and str to uppercase char arrays once to avoid repeated Character.toUpperCase calls.
+        final int patLen = pattern.length();
+        final int strLen = str.length();
+        char[] patUp = new char[patLen];
+        for (int i = 0; i < patLen; i++) {
+            patUp[i] = Character.toUpperCase(pattern.charAt(i));
+        }
+        char[] strUp = new char[strLen];
+        for (int i = 0; i < strLen; i++) {
+            strUp[i] = Character.toUpperCase(str.charAt(i));
+        }
+
         // Process characters before first star
         while (patIdxStart <= patIdxEnd && strIdxStart <= strIdxEnd) {
-            char ch = pattern.charAt(patIdxStart);
+            char ch = patUp[patIdxStart];
             if (ch == '*') {
                 break;
             }
-            if (ch != '?' && different(ch, str.charAt(strIdxStart))) {
+            if (ch != '?' && ch != strUp[strIdxStart]) {
                 return false; // Character mismatch
             }
             patIdxStart++;
@@ -438,7 +450,7 @@ public class StringUtils {
         if (strIdxStart > strIdxEnd) {
             // All characters in the string are used. Check if only '*'s are
             // left in the pattern. If so, we succeeded. Otherwise failure.
-            return allStars(pattern, patIdxStart, patIdxEnd);
+            return allStarsChar(patUp, patIdxStart, patIdxEnd);
         } else if (patIdxStart > patIdxEnd) {
             // String not exhausted by pattern is. Failure
             return false;
@@ -446,11 +458,11 @@ public class StringUtils {
 
         // Process characters after last star
         while (patIdxStart <= patIdxEnd && strIdxStart <= strIdxEnd) {
-            char ch = pattern.charAt(patIdxEnd);
+            char ch = patUp[patIdxEnd];
             if (ch == '*') {
                 break;
             }
-            if (ch != '?' && different(ch, str.charAt(strIdxEnd))) {
+            if (ch != '?' && ch != strUp[strIdxEnd]) {
                 return false; // Character mismatch
             }
             patIdxEnd--;
@@ -459,7 +471,7 @@ public class StringUtils {
         if (strIdxStart > strIdxEnd) {
             // All characters in the string are used. Check if only '*'s are
             // left in the pattern. If so, we succeeded. Otherwise failure.
-            return allStars(pattern, patIdxStart, patIdxEnd);
+            return allStarsChar(patUp, patIdxStart, patIdxEnd);
         }
 
         // Process pattern between stars. patIdxStart and patIdxEnd point
@@ -467,7 +479,7 @@ public class StringUtils {
         while (patIdxStart != patIdxEnd && strIdxStart <= strIdxEnd) {
             int patIdxTmp = -1;
             for (int i = patIdxStart + 1; i <= patIdxEnd; i++) {
-                if (pattern.charAt(i) == '*') {
+                if (patUp[i] == '*') {
                     patIdxTmp = i;
                     break;
                 }
@@ -482,8 +494,8 @@ public class StringUtils {
             int patLength = (patIdxTmp - patIdxStart - 1);
             int strLength = (strIdxEnd - strIdxStart + 1);
 
-            int foundIdx = findPatternInString(pattern, patIdxStart + 1, patLength,
-                    str, strIdxStart, strLength);
+            int foundIdx = findPatternInCharArray(patUp, patIdxStart + 1, patLength,
+                    strUp, strIdxStart, strLength);
 
             if (foundIdx == -1) {
                 return false;
@@ -494,7 +506,7 @@ public class StringUtils {
 
         // All characters in the string are used. Check if only '*'s are left
         // in the pattern. If so, we succeeded. Otherwise failure.
-        return allStars(pattern, patIdxStart, patIdxEnd);
+        return allStarsChar(patUp, patIdxStart, patIdxEnd);
     }
 
     private static int findPatternInString(String pattern, int patStart, int patLength,
@@ -747,4 +759,29 @@ public class StringUtils {
 
         return false;
     }
+
+    private static int findPatternInCharArray(char[] patternUp, int patStart, int patLength,
+                                              char[] strUp, int strStart, int strLength) {
+        strLoop:
+        for (int i = 0; i <= strLength - patLength; i++) {
+            for (int j = 0; j < patLength; j++) {
+                char ch = patternUp[patStart + j];
+                if (ch != '?' && ch != strUp[strStart + i + j]) {
+                    continue strLoop;
+                }
+            }
+            return strStart + i;
+        }
+        return -1;
+    }
+
+    private static boolean allStarsChar(char[] charsUp, int start, int end) {
+        for (int i = start; i <= end; ++i) {
+            if (charsUp[i] != '*') {
+                return false;
+            }
+        }
+        return true;
+    }
+
 }
