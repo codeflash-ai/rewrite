@@ -526,18 +526,18 @@ public class StringUtils {
     }
 
     public static String indent(String text) {
-        StringBuilder indent = new StringBuilder();
-        for (int i = 0; i < text.length(); i++) {
+        int len = text.length();
+        int i = 0;
+        while (i < len) {
             char c = text.charAt(i);
             if (c == '\n' || c == '\r') {
-                return indent.toString();
-            } else if (Character.isWhitespace(c)) {
-                indent.append(c);
-            } else {
-                return indent.toString();
+                break;
+            } else if (!Character.isWhitespace(c)) {
+                break;
             }
+            i++;
         }
-        return indent.toString();
+        return text.substring(0, i);
     }
 
     /**
