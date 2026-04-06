@@ -286,8 +286,14 @@ public class StringUtils {
     public static int indexOfNonWhitespace(String text) {
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (!(c == ' ' || c == '\t' || c == '\n' || c == '\r')) {
-                return i;
+            switch (c) {
+                case ' ':
+                case '\t':
+                case '\n':
+                case '\r':
+                    break;
+                default:
+                    return i;
             }
         }
         return -1;
