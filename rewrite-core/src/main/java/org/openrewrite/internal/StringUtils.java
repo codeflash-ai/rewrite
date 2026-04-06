@@ -551,10 +551,11 @@ public class StringUtils {
         StringBuilder margin = new StringBuilder();
         boolean skipRestOfLine = false;
         char[] charArray = multiline.toCharArray();
-        for (int i = 0; i < charArray.length; i++) {
+        int len = charArray.length;
+        for (int i = 0; i < len; i++) {
             char c = charArray[i];
             if (c == '\n') {
-                if (i < charArray.length - 1 && charArray[i + 1] == '\n') {
+                if (i < len - 1 && charArray[i + 1] == '\n') {
                     i++;
                     continue;
                 } else if (i > 0) {
@@ -562,7 +563,7 @@ public class StringUtils {
                         return "";
                     } else {
                         gcm = commonMargin(gcm, margin);
-                        margin = new StringBuilder();
+                        margin.setLength(0);
                     }
                 }
                 skipRestOfLine = false;
