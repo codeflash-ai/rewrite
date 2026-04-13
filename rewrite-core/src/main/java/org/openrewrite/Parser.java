@@ -215,7 +215,8 @@ public interface Parser {
         }
 
         public EncodingDetectingInputStream getSource(ExecutionContext ctx) {
-            return new EncodingDetectingInputStream(source.get(), ParsingExecutionContextView.view(ctx).getCharset());
+            Charset charset = ParsingExecutionContextView.view(ctx).getCharset();
+            return new EncodingDetectingInputStream(source.get(), charset != null ? charset : StandardCharsets.UTF_8);
         }
 
         @Override
