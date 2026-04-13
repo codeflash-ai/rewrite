@@ -55,51 +55,6 @@ public class JavaSourceSet implements SourceSet {
      */
     Map<String, List<JavaType.FullyQualified>> gavToTypes;
 
-    /**
-     * Extract type information from the provided classpath.
-     * Uses ClassGraph to compute the classpath.
-     * <p>
-     * Does not support gavToTypes or typeToGav mapping
-     *
-     * @param fullTypeInformation Not used, does not do anything, to be deleted
-     * @param ignore              Not used, does not do anything, to be deleted
-     */
-    @Deprecated
-    public static JavaSourceSet build(String sourceSetName, Collection<Path> classpath,
-                                      JavaTypeCache ignore, boolean fullTypeInformation) {
-        if (fullTypeInformation) {
-            throw new UnsupportedOperationException();
-        }
-
-        List<String> typeNames;
-        if (!classpath.iterator().hasNext()) {
-            // Only load JRE-provided types
-            try (ScanResult scanResult = new ClassGraph()
-                    .enableClassInfo()
-                    .enableSystemJarsAndModules()
-                    .acceptPackages("java")
-                    .ignoreClassVisibility()
-                    .scan()) {
-                typeNames = packagesToTypeDeclarations(scanResult);
-            }
-        } else {
-            // Load types from the classpath
-            try (ScanResult scanResult = new ClassGraph()
-                    .overrideClasspath(classpath)
-                    .enableSystemJarsAndModules()
-                    .enableClassInfo()
-                    .ignoreClassVisibility()
-                    .scan()) {
-                typeNames = packagesToTypeDeclarations(scanResult);
-            }
-        }
-
-        // Peculiarly, Classgraph will not return a ClassInfo for java.lang.Object, although it does for all other java.lang types
-        typeNames.add("java.lang.Object");
-        return new JavaSourceSet(randomId(), sourceSetName, typesFrom(typeNames), emptyMap());
-    }
-
-
     /*
      * Create a map of package names to types contained within that package. Type names are not fully qualified, except for type parameter bounds.
      * e.g.: "java.util" -> [List, Date]
