@@ -29,6 +29,9 @@ import org.openrewrite.java.tree.J;
 import org.openrewrite.style.NamedStyles;
 
 import java.io.ByteArrayInputStream;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.charset.Charset;
@@ -480,16 +483,21 @@ class JdkParserBuilderCache {
     private static @Nullable Supplier<JavaParser.Builder<? extends JavaParser, ?>> tryCreateBuilderSupplier(String className) {
         try {
             Class<?> clazz = Class.forName(className);
-            Method builderMethod = clazz.getDeclaredMethod("builder");
+            // Use MethodHandle instead of reflection for faster invocation
+            MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+            // Get the actual return type from the method (e.g., Java21Parser.Builder)
+            Method method = clazz.getMethod("builder");
+            MethodHandle builderHandle = lookup.findStatic(clazz, "builder",
+                    MethodType.methodType(method.getReturnType()));
             return () -> {
                 try {
                     //noinspection rawtypes,unchecked
-                    return (JavaParser.Builder) builderMethod.invoke(null);
+                    return (JavaParser.Builder) builderHandle.invoke();
                 } catch (Throwable e) {
                     throw new RuntimeException("Failed to invoke builder() on " + className, e);
                 }
             };
-        } catch (ClassNotFoundException | NoSuchMethodException e) {
+        } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException e) {
             return null; // This parser version isn't available
         }
     }
