@@ -295,15 +295,19 @@ public class ImportLayoutStyle implements JavaStyle {
 
         JRightPadded<J.Import> finalToAdd = paddedToAdd;
         JRightPadded<J.Import> finalAfter = after;
+        // Cache atomic values to avoid repeated volatile reads in lambda
+        boolean shouldStarFold = starFold.get();
+        int foldFrom = starFoldFrom.get();
+        int foldTo = starFoldTo.get();
         return ListUtils.flatMap(originalImports, (i, anImport) -> {
-            if (starFold.get() && i >= starFoldFrom.get() && i < starFoldTo.get()) {
-                return i == starFoldFrom.get() ?
+            if (shouldStarFold && i >= foldFrom && i < foldTo) {
+                return i == foldFrom ?
                         finalToAdd /* only add the star import once */ :
                         null;
             } else if (finalAfter != null && anImport.getElement().isScope(finalAfter.getElement())) {
-                if (starFold.get()) {
+                if (shouldStarFold) {
                     // The added import is always folded, and is the first package occurrence in the imports.
-                    if (starFoldFrom.get() == starFoldTo.get()) {
+                    if (foldFrom == foldTo) {
                         return Arrays.asList(finalToAdd, finalAfter);
                     } else {
                         return finalAfter;
