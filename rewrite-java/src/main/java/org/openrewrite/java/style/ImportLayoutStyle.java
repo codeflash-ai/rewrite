@@ -720,22 +720,27 @@ public class ImportLayoutStyle implements JavaStyle {
             public List<JRightPadded<J.Import>> orderedImports(LayoutState layoutState, int classCountToUseStarImport, int nameCountToUseStarImport, ImportLayoutConflictDetection importLayoutConflictDetection, List<Block> packagesToFold) {
                 List<JRightPadded<J.Import>> imports = layoutState.getImports(this);
 
-                Map<String, List<JRightPadded<J.Import>>> groupedImports = imports
-                        .stream()
-                        .sorted(IMPORT_SORTING)
-                        .collect(groupingBy(
-                                ImportLayoutStyle::packageOrOuterClassName,
-                                LinkedHashMap::new, // Use an ordered map to preserve sorting
-                                toList()
-                        ));
+                // Sort a copy and group into a LinkedHashMap to preserve sorted order
+                List<JRightPadded<J.Import>> sorted = new ArrayList<>(imports);
+                sorted.sort(IMPORT_SORTING);
+
+                Map<String, List<JRightPadded<J.Import>>> groupedImports = new LinkedHashMap<>();
+                for (JRightPadded<J.Import> imp : sorted) {
+                    groupedImports.computeIfAbsent(packageOrOuterClassName(imp), k -> new ArrayList<>()).add(imp);
+                }
 
                 List<JRightPadded<J.Import>> ordered = new ArrayList<>(imports.size());
 
                 for (List<JRightPadded<J.Import>> importGroup : groupedImports.values()) {
                     JRightPadded<J.Import> toStar = importGroup.get(0);
                     int threshold = toStar.getElement().isStatic() ? nameCountToUseStarImport : classCountToUseStarImport;
-                    boolean starImportExists = importGroup.stream()
-                            .anyMatch(it -> "*".equals(it.getElement().getQualid().getSimpleName()));
+                    boolean starImportExists = false;
+                    for (JRightPadded<J.Import> it : importGroup) {
+                        if ("*".equals(it.getElement().getQualid().getSimpleName())) {
+                            starImportExists = true;
+                            break;
+                        }
+                    }
 
                     if (importLayoutConflictDetection.isPackageFoldable(packageOrOuterClassName(toStar)) &&
                             (isPackageAlwaysFolded(packagesToFold, toStar.getElement()) || importGroup.size() >= threshold || (starImportExists && importGroup.size() > 1))) {
@@ -743,18 +748,28 @@ public class ImportLayoutStyle implements JavaStyle {
                         J.FieldAccess qualid = toStar.getElement().getQualid();
                         J.Identifier name = qualid.getName();
 
-                        Set<String> typeNamesInThisGroup = importGroup.stream()
-                                .map(im -> im.getElement().getClassName())
-                                .collect(toSet());
+                        Set<String> typeNamesInThisGroup = new HashSet<>(importGroup.size());
+                        for (JRightPadded<J.Import> im : importGroup) {
+                            typeNamesInThisGroup.add(im.getElement().getClassName());
+                        }
 
-                        Optional<String> oneOfTheTypesIsInAnotherGroupToo = groupedImports.values().stream()
-                                .filter(group -> group != importGroup)
-                                .flatMap(group -> group.stream()
-                                        .filter(im -> typeNamesInThisGroup.contains(im.getElement().getClassName())))
-                                .map(im -> im.getElement().getTypeName())
-                                .findAny();
+                        String conflictTypeName = null;
+                        for (List<JRightPadded<J.Import>> group : groupedImports.values()) {
+                            if (group == importGroup) {
+                                continue;
+                            }
+                            for (JRightPadded<J.Import> im : group) {
+                                if (typeNamesInThisGroup.contains(im.getElement().getClassName())) {
+                                    conflictTypeName = im.getElement().getTypeName();
+                                    break;
+                                }
+                            }
+                            if (conflictTypeName != null) {
+                                break;
+                            }
+                        }
 
-                        if (starImportExists || !oneOfTheTypesIsInAnotherGroupToo.isPresent()) {
+                        if (starImportExists || conflictTypeName == null) {
                             ordered.add(toStar.withElement(toStar.getElement().withQualid(qualid.withName(name.withSimpleName("*")))));
                             continue;
                         }
