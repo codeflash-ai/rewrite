@@ -243,7 +243,7 @@ public class Assertions {
 
     public static UncheckedConsumer<List<SourceFile>> addTypesToSourceSet(String sourceSetName, List<String> extendsFrom, List<Path> classpath) {
         return sourceFiles -> {
-            JavaSourceSet sourceSet = JavaSourceSet.build(sourceSetName, classpath, new JavaTypeCache(), false);
+            JavaSourceSet sourceSet = JavaSourceSet.build(sourceSetName, classpath);
 
             for (int i = 0; i < sourceFiles.size(); i++) {
                 SourceFile sourceFile = sourceFiles.get(i);

@@ -366,21 +366,22 @@ public interface JavaParser extends Parser {
         return resolveSourcePathFromSourceText(prefix, sourceCode);
     }
 
+    Pattern SOURCE_PATH_PACKAGE_PATTERN = Pattern.compile("^package\\s+([^;]+);");
+    Pattern SOURCE_PATH_CLASS_PATTERN = Pattern.compile("(class|interface|enum|record)\\s*(<[^>]*>)?\\s+(\\w+)");
+    Pattern SOURCE_PATH_PUBLIC_CLASS_PATTERN = Pattern.compile("public\\s+" + SOURCE_PATH_CLASS_PATTERN.pattern());
+
     static Path resolveSourcePathFromSourceText(Path prefix, String sourceCode) {
-        Pattern packagePattern = Pattern.compile("^package\\s+([^;]+);");
-        Pattern classPattern = Pattern.compile("(class|interface|enum|record)\\s*(<[^>]*>)?\\s+(\\w+)");
-        Pattern publicClassPattern = Pattern.compile("public\\s+" + classPattern.pattern());
 
         Function<String, @Nullable String> simpleName = sourceStr -> {
-            Matcher classMatcher = publicClassPattern.matcher(sourceStr);
+            Matcher classMatcher = SOURCE_PATH_PUBLIC_CLASS_PATTERN.matcher(sourceStr);
             if (classMatcher.find()) {
                 return classMatcher.group(3);
             }
-            classMatcher = classPattern.matcher(sourceStr);
+            classMatcher = SOURCE_PATH_CLASS_PATTERN.matcher(sourceStr);
             return classMatcher.find() ? classMatcher.group(3) : null;
         };
 
-        Matcher packageMatcher = packagePattern.matcher(sourceCode);
+        Matcher packageMatcher = SOURCE_PATH_PACKAGE_PATTERN.matcher(sourceCode);
         String pkg = packageMatcher.find() ? packageMatcher.group(1).replace('.', '/') + "/" : "";
 
         String className = Optional.ofNullable(simpleName.apply(sourceCode))
