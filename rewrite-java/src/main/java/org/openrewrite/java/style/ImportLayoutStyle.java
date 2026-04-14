@@ -675,22 +675,42 @@ public class ImportLayoutStyle implements JavaStyle {
 
             // VisibleForTesting
             final static Comparator<JRightPadded<J.Import>> IMPORT_SORTING = (i1, i2) -> {
-                String[] import1 = i1.getElement().getQualid().printTrimmed().split("\\.");
-                String[] import2 = i2.getElement().getQualid().printTrimmed().split("\\.");
+                String s1 = i1.getElement().getQualid().printTrimmed();
+                String s2 = i2.getElement().getQualid().printTrimmed();
+                return compareImportStrings(s1, s2);
+            };
 
-                for (int i = 0; i < Math.min(import1.length, import2.length); i++) {
-                    int diff = import1[i].compareTo(import2[i]);
-                    if (diff != 0) {
-                        return diff;
+            static int compareImportStrings(String s1, String s2) {
+                int len1 = s1.length();
+                int len2 = s2.length();
+                int pos1 = 0, pos2 = 0;
+                while (pos1 < len1 && pos2 < len2) {
+                    int dot1 = s1.indexOf('.', pos1);
+                    int dot2 = s2.indexOf('.', pos2);
+                    int end1 = dot1 == -1 ? len1 : dot1;
+                    int end2 = dot2 == -1 ? len2 : dot2;
+                    int segLen1 = end1 - pos1;
+                    int segLen2 = end2 - pos2;
+                    int segLen = Math.min(segLen1, segLen2);
+                    for (int i = 0; i < segLen; i++) {
+                        int diff = s1.charAt(pos1 + i) - s2.charAt(pos2 + i);
+                        if (diff != 0) {
+                            return diff;
+                        }
                     }
+                    if (segLen1 != segLen2) {
+                        return segLen1 - segLen2;
+                    }
+                    pos1 = end1 + 1;
+                    pos2 = end2 + 1;
                 }
-
-                if (import1.length == import2.length) {
+                boolean has1 = pos1 < len1;
+                boolean has2 = pos2 < len2;
+                if (has1 == has2) {
                     return 0;
                 }
-
-                return import1.length > import2.length ? 1 : -1;
-            };
+                return has1 ? 1 : -1;
+            }
 
             private static final ConcurrentHashMap<String, Pattern> PATTERN_CACHE = new ConcurrentHashMap<>();
 
