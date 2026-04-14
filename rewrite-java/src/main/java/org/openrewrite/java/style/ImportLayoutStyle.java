@@ -589,8 +589,9 @@ public class ImportLayoutStyle implements JavaStyle {
         }
 
         private Map<String, Set<String>> mapNamesInPackageToPackages() {
-            Map<String, Set<String>> nameToPackages = new HashMap<>();
-            Set<String> checkPackageForClasses = new HashSet<>();
+            int importCount = originalImports.size();
+            Map<String, Set<String>> nameToPackages = new HashMap<>(importCount * 4 / 3 + 1);
+            Set<String> checkPackageForClasses = new HashSet<>(importCount * 4 / 3 + 1);
 
             for (JRightPadded<J.Import> anImport : originalImports) {
                 checkPackageForClasses.add(packageOrOuterClassName(anImport));
