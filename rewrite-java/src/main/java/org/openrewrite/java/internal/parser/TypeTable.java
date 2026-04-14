@@ -99,6 +99,7 @@ public class TypeTable implements JavaParserClasspathLoader {
 
     private static final Map<GroupArtifactVersion, CompletableFuture<Path>> classesDirByArtifact = new ConcurrentHashMap<>();
     private static final Map<String, Pattern> artifactPatternCache = new ConcurrentHashMap<>();
+    private static final Pattern PIPE = Pattern.compile("\\|");
 
     public static @Nullable TypeTable fromClasspath(ExecutionContext ctx, Collection<String> artifactNames) {
         try {
@@ -289,7 +290,7 @@ public class TypeTable implements JavaParserClasspathLoader {
                                         name,
                                         fields[5].isEmpty() ? null : fields[5],
                                         fields[6].isEmpty() ? null : fields[6],
-                                        fields[7].isEmpty() ? null : fields[7].split("\\|"),
+                                        fields[7].isEmpty() ? null : PIPE.split(fields[7]),
                                         fields.length > 14 && !fields[14].isEmpty() ? fields[14] : null,  // elementAnnotations - raw string (may have | delimiters)
                                         fields.length > 17 && !fields[17].isEmpty() ? fields[17] : null  // constantValue moved to column 17
                                 ));
@@ -307,8 +308,8 @@ public class TypeTable implements JavaParserClasspathLoader {
                                     fields[9],
                                     fields[10],
                                     fields[11].isEmpty() ? null : fields[11],
-                                    fields[12].isEmpty() ? null : fields[12].split("\\|"),
-                                    fields[13].isEmpty() ? null : fields[13].split("\\|"),
+                                    fields[12].isEmpty() ? null : PIPE.split(fields[12]),
+                                    fields[13].isEmpty() ? null : PIPE.split(fields[13]),
                                     fields.length > 14 && !fields[14].isEmpty() ? fields[14] : null,  // elementAnnotations - raw string
                                     fields.length > 15 && !fields[15].isEmpty() ? fields[15] : null,
                                     fields.length > 16 && !fields[16].isEmpty() ? TsvEscapeUtils.splitAnnotationList(fields[16], '|') : null,  // typeAnnotations - keep `|` delimiter between different type contexts
