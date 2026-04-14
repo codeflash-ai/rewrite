@@ -43,6 +43,7 @@ import org.openrewrite.style.Style;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
@@ -691,15 +692,18 @@ public class ImportLayoutStyle implements JavaStyle {
                 return import1.length > import2.length ? 1 : -1;
             };
 
+            private static final ConcurrentHashMap<String, Pattern> PATTERN_CACHE = new ConcurrentHashMap<>();
+
             private final Boolean statik;
             @Getter
             private final Pattern packageWildcard;
 
             public ImportPackage(Boolean statik, String packageWildcard, boolean withSubpackages) {
                 this.statik = statik;
-                this.packageWildcard = Pattern.compile(packageWildcard
+                String regex = packageWildcard
                         .replace(".", "\\.")
-                        .replace("*", withSubpackages ? ".+" : "[^.]+"));
+                        .replace("*", withSubpackages ? ".+" : "[^.]+");
+                this.packageWildcard = PATTERN_CACHE.computeIfAbsent(regex, Pattern::compile);
             }
 
             public boolean isStatic() {
