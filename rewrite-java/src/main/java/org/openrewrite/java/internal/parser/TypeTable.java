@@ -98,6 +98,7 @@ public class TypeTable implements JavaParserClasspathLoader {
     public static final String DEFAULT_RESOURCE_PATH = "META-INF/rewrite/classpath.tsv.gz";
 
     private static final Map<GroupArtifactVersion, CompletableFuture<Path>> classesDirByArtifact = new ConcurrentHashMap<>();
+    private static final Map<String, Pattern> artifactPatternCache = new ConcurrentHashMap<>();
 
     public static @Nullable TypeTable fromClasspath(ExecutionContext ctx, Collection<String> artifactNames) {
         try {
@@ -160,7 +161,8 @@ public class TypeTable implements JavaParserClasspathLoader {
     private static Collection<String> artifactsNotYetWritten(Collection<String> artifactNames) {
         Collection<String> notWritten = new ArrayList<>(artifactNames);
         for (String artifactName : artifactNames) {
-            Pattern artifactPattern = Pattern.compile(artifactName + ".*");
+            Pattern artifactPattern = artifactPatternCache.computeIfAbsent(artifactName,
+                    name -> Pattern.compile(name + ".*"));
             for (GroupArtifactVersion groupArtifactVersion : classesDirByArtifact.keySet()) {
                 if (artifactPattern
                         .matcher(groupArtifactVersion.getArtifactId() + "-" + groupArtifactVersion.getVersion())
