@@ -604,9 +604,11 @@ public class TypeTable implements JavaParserClasspathLoader {
 
     @Override
     public @Nullable Path load(String artifactName) {
+        Pattern artifactPattern = artifactPatternCache.computeIfAbsent(artifactName,
+                name -> Pattern.compile(name + ".*"));
         for (Map.Entry<GroupArtifactVersion, CompletableFuture<Path>> gavAndClassesDir : classesDirByArtifact.entrySet()) {
             GroupArtifactVersion gav = gavAndClassesDir.getKey();
-            if (Pattern.compile(artifactName + ".*")
+            if (artifactPattern
                     .matcher(gav.getArtifactId() + "-" + gav.getVersion())
                     .matches()) {
                 return gavAndClassesDir.getValue().join();
