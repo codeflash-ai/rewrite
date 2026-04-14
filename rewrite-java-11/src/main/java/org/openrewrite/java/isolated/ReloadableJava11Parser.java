@@ -380,6 +380,8 @@ public class ReloadableJava11Parser implements JavaParser {
 
     private static class ByteArrayCapableJavacFileManager extends JavacFileManager {
         private final List<PackageAwareJavaFileObject> classByteClasspath;
+        private final IdentityHashMap<JavaFileObject, String> inferBinaryNameCache = new IdentityHashMap<>();
+        private final HashMap<String, List<JavaFileObject>> listCache = new HashMap<>();
 
         public ByteArrayCapableJavacFileManager(Context context,
                                                 boolean register,
@@ -396,19 +398,51 @@ public class ReloadableJava11Parser implements JavaParser {
             if (file instanceof PackageAwareJavaFileObject) {
                 return ((PackageAwareJavaFileObject) file).getClassName();
             }
-            return super.inferBinaryName(location, file);
+            String cached = inferBinaryNameCache.get(file);
+            if (cached != null) {
+                return cached;
+            }
+            String result = super.inferBinaryName(location, file);
+            if (result != null) {
+                inferBinaryNameCache.put(file, result);
+            }
+            return result;
+        }
+
+        @Override
+        public void flush() {
+            super.flush();
+            inferBinaryNameCache.clear();
+            listCache.clear();
+        }
+
+        @Override
+        public void setLocationFromPaths(Location location, Collection<? extends Path> paths) throws IOException {
+            super.setLocationFromPaths(location, paths);
+            listCache.clear();
         }
 
         @Override
         public Iterable<JavaFileObject> list(Location location, String packageName, Set<JavaFileObject.Kind> kinds, boolean recurse) throws IOException {
+            String key = location.getName() + ':' + packageName + ':' + kinds + ':' + recurse;
+            List<JavaFileObject> cached = listCache.get(key);
+            if (cached != null) {
+                return cached;
+            }
+            List<JavaFileObject> result;
             if (StandardLocation.CLASS_PATH.equals(location)) {
                 Iterable<JavaFileObject> listed = super.list(location, packageName, kinds, recurse);
-                return Stream.concat(classByteClasspath.stream()
+                result = Stream.concat(classByteClasspath.stream()
                                 .filter(jfo -> jfo.getPackage().equals(packageName)),
                         StreamSupport.stream(listed.spliterator(), false)
                 ).collect(toList());
+            } else {
+                Iterable<JavaFileObject> listed = super.list(location, packageName, kinds, recurse);
+                result = listed instanceof List ? (List<JavaFileObject>) listed :
+                        StreamSupport.stream(listed.spliterator(), false).collect(toList());
             }
-            return super.list(location, packageName, kinds, recurse);
+            listCache.put(key, result);
+            return result;
         }
     }
 
