@@ -29,10 +29,4 @@ public class JavaSourceSetBenchmark {
     public void jarIOBenchmark() {
         JavaSourceSet.build("main", classpath);
     }
-
-    @Benchmark
-    public void classgraphBenchmark() {
-        //noinspection deprecation
-        JavaSourceSet.build("main", classpath, new JavaTypeCache(), false);
-    }
 }

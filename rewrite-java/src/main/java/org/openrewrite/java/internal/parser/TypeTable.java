@@ -98,6 +98,8 @@ public class TypeTable implements JavaParserClasspathLoader {
     public static final String DEFAULT_RESOURCE_PATH = "META-INF/rewrite/classpath.tsv.gz";
 
     private static final Map<GroupArtifactVersion, CompletableFuture<Path>> classesDirByArtifact = new ConcurrentHashMap<>();
+    private static final Map<String, Pattern> artifactPatternCache = new ConcurrentHashMap<>();
+    private static final Pattern PIPE = Pattern.compile("\\|");
 
     public static @Nullable TypeTable fromClasspath(ExecutionContext ctx, Collection<String> artifactNames) {
         try {
@@ -160,7 +162,8 @@ public class TypeTable implements JavaParserClasspathLoader {
     private static Collection<String> artifactsNotYetWritten(Collection<String> artifactNames) {
         Collection<String> notWritten = new ArrayList<>(artifactNames);
         for (String artifactName : artifactNames) {
-            Pattern artifactPattern = Pattern.compile(artifactName + ".*");
+            Pattern artifactPattern = artifactPatternCache.computeIfAbsent(artifactName,
+                    name -> Pattern.compile(name + ".*"));
             for (GroupArtifactVersion groupArtifactVersion : classesDirByArtifact.keySet()) {
                 if (artifactPattern
                         .matcher(groupArtifactVersion.getArtifactId() + "-" + groupArtifactVersion.getVersion())
@@ -287,7 +290,7 @@ public class TypeTable implements JavaParserClasspathLoader {
                                         name,
                                         fields[5].isEmpty() ? null : fields[5],
                                         fields[6].isEmpty() ? null : fields[6],
-                                        fields[7].isEmpty() ? null : fields[7].split("\\|"),
+                                        fields[7].isEmpty() ? null : PIPE.split(fields[7]),
                                         fields.length > 14 && !fields[14].isEmpty() ? fields[14] : null,  // elementAnnotations - raw string (may have | delimiters)
                                         fields.length > 17 && !fields[17].isEmpty() ? fields[17] : null  // constantValue moved to column 17
                                 ));
@@ -305,8 +308,8 @@ public class TypeTable implements JavaParserClasspathLoader {
                                     fields[9],
                                     fields[10],
                                     fields[11].isEmpty() ? null : fields[11],
-                                    fields[12].isEmpty() ? null : fields[12].split("\\|"),
-                                    fields[13].isEmpty() ? null : fields[13].split("\\|"),
+                                    fields[12].isEmpty() ? null : PIPE.split(fields[12]),
+                                    fields[13].isEmpty() ? null : PIPE.split(fields[13]),
                                     fields.length > 14 && !fields[14].isEmpty() ? fields[14] : null,  // elementAnnotations - raw string
                                     fields.length > 15 && !fields[15].isEmpty() ? fields[15] : null,
                                     fields.length > 16 && !fields[16].isEmpty() ? TsvEscapeUtils.splitAnnotationList(fields[16], '|') : null,  // typeAnnotations - keep `|` delimiter between different type contexts
@@ -601,9 +604,11 @@ public class TypeTable implements JavaParserClasspathLoader {
 
     @Override
     public @Nullable Path load(String artifactName) {
+        Pattern artifactPattern = artifactPatternCache.computeIfAbsent(artifactName,
+                name -> Pattern.compile(name + ".*"));
         for (Map.Entry<GroupArtifactVersion, CompletableFuture<Path>> gavAndClassesDir : classesDirByArtifact.entrySet()) {
             GroupArtifactVersion gav = gavAndClassesDir.getKey();
-            if (Pattern.compile(artifactName + ".*")
+            if (artifactPattern
                     .matcher(gav.getArtifactId() + "-" + gav.getVersion())
                     .matches()) {
                 return gavAndClassesDir.getValue().join();

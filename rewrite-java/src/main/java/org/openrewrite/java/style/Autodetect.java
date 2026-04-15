@@ -538,7 +538,7 @@ public class Autodetect extends NamedStyles {
     }
 
     private static class ImportLayoutStatistics {
-        List<List<Block>> blocksPerSourceFile = new ArrayList<>();
+        List<List<Block>> blocksPerSourceFile = new ArrayList<>(20);
         Map<String, String> pkgToBlockPattern = new LinkedHashMap<>();
         int staticAtTopCount = 0;
         int staticAtBotCount = 0;
@@ -588,10 +588,11 @@ public class Autodetect extends NamedStyles {
                         int nonStaticPos = 0;
                         int staticPos = 0;
 
-                        List<Block> nonStaticBlocks = new ArrayList<>(); // Isolate static imports to add at top or bottom of layout.
-                        List<Block> staticBlocks = new ArrayList<>(); // Isolate static imports to add at top or bottom of layout.
-                        List<Integer> countOfBlocksInNonStaticGroups = new ArrayList<>();
-                        List<Integer> countOfBlocksInStaticGroups = new ArrayList<>();
+                        int blockCount = longestBlocks.size();
+                        List<Block> nonStaticBlocks = new ArrayList<>(blockCount); // Isolate static imports to add at top or bottom of layout.
+                        List<Block> staticBlocks = new ArrayList<>(blockCount); // Isolate static imports to add at top or bottom of layout.
+                        List<Integer> countOfBlocksInNonStaticGroups = new ArrayList<>(blockCount);
+                        List<Integer> countOfBlocksInStaticGroups = new ArrayList<>(blockCount);
 
                         for (Block block : longestBlocks) {
                             if (BlockType.ImportStatic == block.type) {

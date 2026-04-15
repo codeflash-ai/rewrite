@@ -43,6 +43,7 @@ import org.openrewrite.style.Style;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
@@ -295,15 +296,19 @@ public class ImportLayoutStyle implements JavaStyle {
 
         JRightPadded<J.Import> finalToAdd = paddedToAdd;
         JRightPadded<J.Import> finalAfter = after;
+        // Cache atomic values to avoid repeated volatile reads in lambda
+        boolean shouldStarFold = starFold.get();
+        int foldFrom = starFoldFrom.get();
+        int foldTo = starFoldTo.get();
         return ListUtils.flatMap(originalImports, (i, anImport) -> {
-            if (starFold.get() && i >= starFoldFrom.get() && i < starFoldTo.get()) {
-                return i == starFoldFrom.get() ?
+            if (shouldStarFold && i >= foldFrom && i < foldTo) {
+                return i == foldFrom ?
                         finalToAdd /* only add the star import once */ :
                         null;
             } else if (finalAfter != null && anImport.getElement().isScope(finalAfter.getElement())) {
-                if (starFold.get()) {
+                if (shouldStarFold) {
                     // The added import is always folded, and is the first package occurrence in the imports.
-                    if (starFoldFrom.get() == starFoldTo.get()) {
+                    if (foldFrom == foldTo) {
                         return Arrays.asList(finalToAdd, finalAfter);
                     } else {
                         return finalAfter;
@@ -585,8 +590,9 @@ public class ImportLayoutStyle implements JavaStyle {
         }
 
         private Map<String, Set<String>> mapNamesInPackageToPackages() {
-            Map<String, Set<String>> nameToPackages = new HashMap<>();
-            Set<String> checkPackageForClasses = new HashSet<>();
+            int importCount = originalImports.size();
+            Map<String, Set<String>> nameToPackages = new HashMap<>(importCount * 4 / 3 + 1);
+            Set<String> checkPackageForClasses = new HashSet<>(importCount * 4 / 3 + 1);
 
             for (JRightPadded<J.Import> anImport : originalImports) {
                 checkPackageForClasses.add(packageOrOuterClassName(anImport));
@@ -669,22 +675,44 @@ public class ImportLayoutStyle implements JavaStyle {
 
             // VisibleForTesting
             final static Comparator<JRightPadded<J.Import>> IMPORT_SORTING = (i1, i2) -> {
-                String[] import1 = i1.getElement().getQualid().printTrimmed().split("\\.");
-                String[] import2 = i2.getElement().getQualid().printTrimmed().split("\\.");
+                String s1 = i1.getElement().getQualid().printTrimmed();
+                String s2 = i2.getElement().getQualid().printTrimmed();
+                return compareImportStrings(s1, s2);
+            };
 
-                for (int i = 0; i < Math.min(import1.length, import2.length); i++) {
-                    int diff = import1[i].compareTo(import2[i]);
-                    if (diff != 0) {
-                        return diff;
+            static int compareImportStrings(String s1, String s2) {
+                int len1 = s1.length();
+                int len2 = s2.length();
+                int pos1 = 0, pos2 = 0;
+                while (pos1 < len1 && pos2 < len2) {
+                    int dot1 = s1.indexOf('.', pos1);
+                    int dot2 = s2.indexOf('.', pos2);
+                    int end1 = dot1 == -1 ? len1 : dot1;
+                    int end2 = dot2 == -1 ? len2 : dot2;
+                    int segLen1 = end1 - pos1;
+                    int segLen2 = end2 - pos2;
+                    int segLen = Math.min(segLen1, segLen2);
+                    for (int i = 0; i < segLen; i++) {
+                        int diff = s1.charAt(pos1 + i) - s2.charAt(pos2 + i);
+                        if (diff != 0) {
+                            return diff;
+                        }
                     }
+                    if (segLen1 != segLen2) {
+                        return segLen1 - segLen2;
+                    }
+                    pos1 = end1 + 1;
+                    pos2 = end2 + 1;
                 }
-
-                if (import1.length == import2.length) {
+                boolean has1 = pos1 < len1;
+                boolean has2 = pos2 < len2;
+                if (has1 == has2) {
                     return 0;
                 }
+                return has1 ? 1 : -1;
+            }
 
-                return import1.length > import2.length ? 1 : -1;
-            };
+            private static final ConcurrentHashMap<String, Pattern> PATTERN_CACHE = new ConcurrentHashMap<>();
 
             private final Boolean statik;
             @Getter
@@ -692,9 +720,10 @@ public class ImportLayoutStyle implements JavaStyle {
 
             public ImportPackage(Boolean statik, String packageWildcard, boolean withSubpackages) {
                 this.statik = statik;
-                this.packageWildcard = Pattern.compile(packageWildcard
+                String regex = packageWildcard
                         .replace(".", "\\.")
-                        .replace("*", withSubpackages ? ".+" : "[^.]+"));
+                        .replace("*", withSubpackages ? ".+" : "[^.]+");
+                this.packageWildcard = PATTERN_CACHE.computeIfAbsent(regex, Pattern::compile);
             }
 
             public boolean isStatic() {
@@ -711,22 +740,27 @@ public class ImportLayoutStyle implements JavaStyle {
             public List<JRightPadded<J.Import>> orderedImports(LayoutState layoutState, int classCountToUseStarImport, int nameCountToUseStarImport, ImportLayoutConflictDetection importLayoutConflictDetection, List<Block> packagesToFold) {
                 List<JRightPadded<J.Import>> imports = layoutState.getImports(this);
 
-                Map<String, List<JRightPadded<J.Import>>> groupedImports = imports
-                        .stream()
-                        .sorted(IMPORT_SORTING)
-                        .collect(groupingBy(
-                                ImportLayoutStyle::packageOrOuterClassName,
-                                LinkedHashMap::new, // Use an ordered map to preserve sorting
-                                toList()
-                        ));
+                // Sort a copy and group into a LinkedHashMap to preserve sorted order
+                List<JRightPadded<J.Import>> sorted = new ArrayList<>(imports);
+                sorted.sort(IMPORT_SORTING);
+
+                Map<String, List<JRightPadded<J.Import>>> groupedImports = new LinkedHashMap<>();
+                for (JRightPadded<J.Import> imp : sorted) {
+                    groupedImports.computeIfAbsent(packageOrOuterClassName(imp), k -> new ArrayList<>()).add(imp);
+                }
 
                 List<JRightPadded<J.Import>> ordered = new ArrayList<>(imports.size());
 
                 for (List<JRightPadded<J.Import>> importGroup : groupedImports.values()) {
                     JRightPadded<J.Import> toStar = importGroup.get(0);
                     int threshold = toStar.getElement().isStatic() ? nameCountToUseStarImport : classCountToUseStarImport;
-                    boolean starImportExists = importGroup.stream()
-                            .anyMatch(it -> "*".equals(it.getElement().getQualid().getSimpleName()));
+                    boolean starImportExists = false;
+                    for (JRightPadded<J.Import> it : importGroup) {
+                        if ("*".equals(it.getElement().getQualid().getSimpleName())) {
+                            starImportExists = true;
+                            break;
+                        }
+                    }
 
                     if (importLayoutConflictDetection.isPackageFoldable(packageOrOuterClassName(toStar)) &&
                             (isPackageAlwaysFolded(packagesToFold, toStar.getElement()) || importGroup.size() >= threshold || (starImportExists && importGroup.size() > 1))) {
@@ -734,18 +768,28 @@ public class ImportLayoutStyle implements JavaStyle {
                         J.FieldAccess qualid = toStar.getElement().getQualid();
                         J.Identifier name = qualid.getName();
 
-                        Set<String> typeNamesInThisGroup = importGroup.stream()
-                                .map(im -> im.getElement().getClassName())
-                                .collect(toSet());
+                        Set<String> typeNamesInThisGroup = new HashSet<>(importGroup.size());
+                        for (JRightPadded<J.Import> im : importGroup) {
+                            typeNamesInThisGroup.add(im.getElement().getClassName());
+                        }
 
-                        Optional<String> oneOfTheTypesIsInAnotherGroupToo = groupedImports.values().stream()
-                                .filter(group -> group != importGroup)
-                                .flatMap(group -> group.stream()
-                                        .filter(im -> typeNamesInThisGroup.contains(im.getElement().getClassName())))
-                                .map(im -> im.getElement().getTypeName())
-                                .findAny();
+                        String conflictTypeName = null;
+                        for (List<JRightPadded<J.Import>> group : groupedImports.values()) {
+                            if (group == importGroup) {
+                                continue;
+                            }
+                            for (JRightPadded<J.Import> im : group) {
+                                if (typeNamesInThisGroup.contains(im.getElement().getClassName())) {
+                                    conflictTypeName = im.getElement().getTypeName();
+                                    break;
+                                }
+                            }
+                            if (conflictTypeName != null) {
+                                break;
+                            }
+                        }
 
-                        if (starImportExists || !oneOfTheTypesIsInAnotherGroupToo.isPresent()) {
+                        if (starImportExists || conflictTypeName == null) {
                             ordered.add(toStar.withElement(toStar.getElement().withQualid(qualid.withName(name.withSimpleName("*")))));
                             continue;
                         }

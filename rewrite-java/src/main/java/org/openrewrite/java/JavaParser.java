@@ -29,6 +29,9 @@ import org.openrewrite.java.tree.J;
 import org.openrewrite.style.NamedStyles;
 
 import java.io.ByteArrayInputStream;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.charset.Charset;
@@ -366,21 +369,22 @@ public interface JavaParser extends Parser {
         return resolveSourcePathFromSourceText(prefix, sourceCode);
     }
 
+    Pattern SOURCE_PATH_PACKAGE_PATTERN = Pattern.compile("^package\\s+([^;]+);");
+    Pattern SOURCE_PATH_CLASS_PATTERN = Pattern.compile("(class|interface|enum|record)\\s*(<[^>]*>)?\\s+(\\w+)");
+    Pattern SOURCE_PATH_PUBLIC_CLASS_PATTERN = Pattern.compile("public\\s+" + SOURCE_PATH_CLASS_PATTERN.pattern());
+
     static Path resolveSourcePathFromSourceText(Path prefix, String sourceCode) {
-        Pattern packagePattern = Pattern.compile("^package\\s+([^;]+);");
-        Pattern classPattern = Pattern.compile("(class|interface|enum|record)\\s*(<[^>]*>)?\\s+(\\w+)");
-        Pattern publicClassPattern = Pattern.compile("public\\s+" + classPattern.pattern());
 
         Function<String, @Nullable String> simpleName = sourceStr -> {
-            Matcher classMatcher = publicClassPattern.matcher(sourceStr);
+            Matcher classMatcher = SOURCE_PATH_PUBLIC_CLASS_PATTERN.matcher(sourceStr);
             if (classMatcher.find()) {
                 return classMatcher.group(3);
             }
-            classMatcher = classPattern.matcher(sourceStr);
+            classMatcher = SOURCE_PATH_CLASS_PATTERN.matcher(sourceStr);
             return classMatcher.find() ? classMatcher.group(3) : null;
         };
 
-        Matcher packageMatcher = packagePattern.matcher(sourceCode);
+        Matcher packageMatcher = SOURCE_PATH_PACKAGE_PATTERN.matcher(sourceCode);
         String pkg = packageMatcher.find() ? packageMatcher.group(1).replace('.', '/') + "/" : "";
 
         String className = Optional.ofNullable(simpleName.apply(sourceCode))
@@ -479,16 +483,21 @@ class JdkParserBuilderCache {
     private static @Nullable Supplier<JavaParser.Builder<? extends JavaParser, ?>> tryCreateBuilderSupplier(String className) {
         try {
             Class<?> clazz = Class.forName(className);
-            Method builderMethod = clazz.getDeclaredMethod("builder");
+            // Use MethodHandle instead of reflection for faster invocation
+            MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+            // Get the actual return type from the method (e.g., Java21Parser.Builder)
+            Method method = clazz.getMethod("builder");
+            MethodHandle builderHandle = lookup.findStatic(clazz, "builder",
+                    MethodType.methodType(method.getReturnType()));
             return () -> {
                 try {
                     //noinspection rawtypes,unchecked
-                    return (JavaParser.Builder) builderMethod.invoke(null);
+                    return (JavaParser.Builder) builderHandle.invoke();
                 } catch (Throwable e) {
                     throw new RuntimeException("Failed to invoke builder() on " + className, e);
                 }
             };
-        } catch (ClassNotFoundException | NoSuchMethodException e) {
+        } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException e) {
             return null; // This parser version isn't available
         }
     }
