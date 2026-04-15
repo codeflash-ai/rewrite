@@ -352,6 +352,13 @@ class ReloadableJava8Parser implements JavaParser {
         }
 
         @Override
+        public void setLocation(Location location, Iterable<? extends File> files) throws IOException {
+            super.setLocation(location, files);
+            inferBinaryNameCache.clear();
+            listCache.clear();
+        }
+
+        @Override
         public Iterable<JavaFileObject> list(Location location, String packageName, Set<JavaFileObject.Kind> kinds, boolean recurse) throws IOException {
             String cacheKey = location.getName() + ':' + packageName + ':' + kinds + ':' + recurse;
             List<JavaFileObject> cached = listCache.get(cacheKey);

@@ -150,6 +150,16 @@ public class JavaSourceSet implements SourceSet {
     // Purely IO-based classpath scanning below this point
 
     /**
+     * @deprecated Use {@link #build(String, Collection)} instead. The {@code JavaTypeCache} and
+     * {@code fullTypeInformation} parameters are no longer used.
+     */
+    @Deprecated
+    public static JavaSourceSet build(String sourceSetName, Collection<Path> classpath,
+                                      JavaTypeCache ignore, boolean fullTypeInformation) {
+        return build(sourceSetName, classpath);
+    }
+
+    /**
      * Extract type information from the provided classpath.
      * Uses file I/O to compute the classpath.
      */

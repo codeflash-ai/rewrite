@@ -419,6 +419,7 @@ public class ReloadableJava11Parser implements JavaParser {
         @Override
         public void setLocationFromPaths(Location location, Collection<? extends Path> paths) throws IOException {
             super.setLocationFromPaths(location, paths);
+            inferBinaryNameCache.clear();
             listCache.clear();
         }
 
